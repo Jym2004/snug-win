@@ -12,6 +12,10 @@ public sealed record AppConfig
 
     public bool PhoneScreen { get; init; } = true;
     public bool Gestures { get; init; } = true;
+    public bool GestureScroll { get; init; } = true;
+    public bool GestureLongPressRightClick { get; init; } = true;
+    public bool CopyAfterSelection { get; init; } = true;
+    public bool GesturesInjectedOnly { get; init; } = true;
     public bool Screenshot { get; init; } = false;
     public int ZoomSteps { get; init; } = 2;
     public PhoneChoice Phone { get; init; } = PhoneChoice.Standard;

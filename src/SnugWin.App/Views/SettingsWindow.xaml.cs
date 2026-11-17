@@ -49,8 +49,15 @@ public partial class SettingsWindow : Window
             var cfg = _controller.Config;
             PhoneScreenCheck.IsChecked = cfg.PhoneScreen;
             GesturesCheck.IsChecked = cfg.Gestures;
+            GestureScrollCheck.IsChecked = cfg.GestureScroll;
+            GestureRightClickCheck.IsChecked = cfg.GestureLongPressRightClick;
+            CopyAfterSelectionCheck.IsChecked = cfg.CopyAfterSelection;
+            InjectedOnlyCheck.IsChecked = cfg.GesturesInjectedOnly;
+            GestureScrollCheck.IsEnabled = cfg.Gestures;
+            GestureRightClickCheck.IsEnabled = cfg.Gestures;
+            CopyAfterSelectionCheck.IsEnabled = cfg.Gestures;
+            InjectedOnlyCheck.IsEnabled = cfg.Gestures;
             ScreenshotCheck.IsChecked = cfg.Screenshot;
-            InjectedOnlyCheck.IsChecked = _controller.RequireInjectedInput;
             ManualPhoneCheck.IsChecked = _controller.ManualOverride;
             PhoneModelText.Text = $"{cfg.Phone.Model ?? "自定义"}（{cfg.Phone.Screen.Width} × {cfg.Phone.Screen.Height}）";
 
@@ -81,6 +88,24 @@ public partial class SettingsWindow : Window
         _controller.SetGesturesEnabled(GesturesCheck.IsChecked == true);
     }
 
+    private void OnGestureScrollChanged(object sender, RoutedEventArgs e)
+    {
+        if (_suppressEvents) return;
+        _controller.SetGestureScrollEnabled(GestureScrollCheck.IsChecked == true);
+    }
+
+    private void OnGestureRightClickChanged(object sender, RoutedEventArgs e)
+    {
+        if (_suppressEvents) return;
+        _controller.SetGestureLongPressRightClickEnabled(GestureRightClickCheck.IsChecked == true);
+    }
+
+    private void OnCopyAfterSelectionChanged(object sender, RoutedEventArgs e)
+    {
+        if (_suppressEvents) return;
+        _controller.SetCopyAfterSelectionEnabled(CopyAfterSelectionCheck.IsChecked == true);
+    }
+
     private void OnScreenshotChanged(object sender, RoutedEventArgs e)
     {
         if (_suppressEvents) return;
@@ -90,7 +115,7 @@ public partial class SettingsWindow : Window
     private void OnInjectedOnlyChanged(object sender, RoutedEventArgs e)
     {
         if (_suppressEvents) return;
-        _controller.RequireInjectedInput = InjectedOnlyCheck.IsChecked == true;
+        _controller.SetGesturesInjectedOnlyEnabled(InjectedOnlyCheck.IsChecked == true);
     }
 
     private void OnManualChanged(object sender, RoutedEventArgs e)

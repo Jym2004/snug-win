@@ -33,6 +33,14 @@ public enum TouchInputKind
 
 public readonly record struct TouchInput(TouchInputKind Kind, PointD Location, double Time);
 
+public sealed record TouchOptions(
+    bool AllowScroll = true,
+    bool AllowRightClick = true,
+    bool NotifySelectionEnded = false)
+{
+    public static readonly TouchOptions Default = new();
+}
+
 public abstract record TouchCommand
 {
     public sealed record ReplayPress : TouchCommand;
@@ -40,6 +48,7 @@ public abstract record TouchCommand
     public sealed record RightClick(PointD At) : TouchCommand;
     public sealed record Scroll(ScrollStep Step) : TouchCommand;
     public sealed record CloseWindow(PointD At) : TouchCommand;
+    public sealed record SelectionCompleted(PointD At) : TouchCommand;
 }
 
 public sealed record TouchResponse(bool PassOriginal, IReadOnlyList<TouchCommand> Commands)
@@ -79,12 +88,16 @@ public struct TouchTranslator
     private bool _pressOnClose;
 
     public bool IsCoasting => _momentum.HasValue;
+    public PointD Origin => _origin;
 
-    public TouchResponse Handle(TouchInput input, TouchRegion? region) => input.Kind switch
+    public TouchResponse Handle(TouchInput input, TouchRegion? region) =>
+        Handle(input, region, TouchOptions.Default);
+
+    public TouchResponse Handle(TouchInput input, TouchRegion? region, TouchOptions options) => input.Kind switch
     {
         TouchInputKind.Press => Press(input, region),
-        TouchInputKind.Drag => Drag(input),
-        TouchInputKind.Release => Release(input),
+        TouchInputKind.Drag => Drag(input, options),
+        TouchInputKind.Release => Release(input, options),
         _ => TouchResponse.Pass
     };
 
@@ -124,7 +137,7 @@ public struct TouchTranslator
         return stop is null ? TouchResponse.SwallowEmpty : TouchResponse.Swallow(stop);
     }
 
-    private TouchResponse Drag(TouchInput input)
+    private TouchResponse Drag(TouchInput input, TouchOptions options)
     {
         switch (_phase)
         {
@@ -134,7 +147,7 @@ public struct TouchTranslator
             case PhaseKind.Pending:
                 if (_origin.DistanceTo(input.Location) < Slop * _scale)
                     return TouchResponse.SwallowEmpty;
-                if (input.Time - _pendingSince >= HoldDuration)
+                if (input.Time - _pendingSince >= HoldDuration || !options.AllowScroll)
                 {
                     _phase = PhaseKind.Selecting;
                     return TouchResponse.Swallow(new TouchCommand.ReplayPress(), new TouchCommand.ReplayCurrent());
@@ -151,17 +164,21 @@ public struct TouchTranslator
         }
     }
 
-    private TouchResponse Release(TouchInput input)
+    private TouchResponse Release(TouchInput input, TouchOptions options)
     {
         switch (_phase)
         {
             case PhaseKind.Idle:
-            case PhaseKind.Selecting:
                 _phase = PhaseKind.Idle;
                 return TouchResponse.Pass;
+            case PhaseKind.Selecting:
+                _phase = PhaseKind.Idle;
+                return options.NotifySelectionEnded && _origin.DistanceTo(input.Location) >= Slop * _scale
+                    ? new TouchResponse(true, new[] { new TouchCommand.SelectionCompleted(input.Location) })
+                    : TouchResponse.Pass;
             case PhaseKind.Pending:
                 _phase = PhaseKind.Idle;
-                if (input.Time - _pendingSince >= HoldDuration)
+                if (input.Time - _pendingSince >= HoldDuration && options.AllowRightClick)
                     return TouchResponse.Swallow(new TouchCommand.RightClick(_origin));
                 if (_pressStoppedCoast)
                     return TouchResponse.SwallowEmpty;

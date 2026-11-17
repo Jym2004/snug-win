@@ -49,6 +49,7 @@ public sealed class AppController : ILogSink
     private HomeBarWindow? _homeBarWindow;
     private ScreenshotOverlayWindow? _screenshotOverlayWindow;
     private CropWindow? _cropWindow;
+    private CopySelectionBubbleWindow? _copyBubbleWindow;
     private CapturedImage? _cropWindowImage;
     private bool _shuttingDown;
     private int _sampling;
@@ -114,6 +115,8 @@ public sealed class AppController : ILogSink
         _desk.TopologyChanging += () => _session.NoteSelfInducedChange(DateTimeOffset.Now);
         _desk.Gone += OnDeskGone;
         _touchHook.CloseWindowRequested += handle => _dispatcher.BeginInvoke(() => _desk.ClosePlaced(handle));
+        _touchHook.SelectionCompleted += pt => _dispatcher.BeginInvoke(() => ShowCopySelectionBubble(pt));
+        _touchHook.SelectionDismissed += () => _dispatcher.BeginInvoke(() => _copyBubbleWindow?.HideBubble());
         SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
 
         _tickTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
@@ -281,6 +284,12 @@ public sealed class AppController : ILogSink
     {
         var st = _desk.State;
         bool translating = _config.Gestures && _screenshots.Overlay?.IsCropping != true;
+        _touchHook.RequireInjectedFlag = _config.GesturesInjectedOnly && !_sensor.ManualOverride;
+        _touchHook.Options = new TouchOptions(
+            AllowScroll: _config.GestureScroll,
+            AllowRightClick: _config.GestureLongPressRightClick,
+            NotifySelectionEnded: _config.CopyAfterSelection && !st.ListVisible);
+
         if (!translating || st.ScreenPhase != PhoneScreenPhase.Ready || st.DisplayId is not { } id || _displays.BoundsOf(id) is not { } bounds)
         {
             _lastTouchRegionFrame = null;
@@ -294,6 +303,25 @@ public sealed class AppController : ILogSink
         }
         var closeBtn = st.ListVisible ? null : st.CloseButton;
         _touchHook.SetRegion(TouchRegion.ForPhoneScreen(bounds, closeBtn));
+    }
+
+    private void ShowCopySelectionBubble(PointD selectionEnd)
+    {
+        var st = _desk.State;
+        if (!_config.CopyAfterSelection || st.ListVisible || st.ScreenPhase != PhoneScreenPhase.Ready
+            || st.DisplayId is not { } id || _displays.BoundsOf(id) is not { } bounds)
+            return;
+
+        _copyBubbleWindow ??= new CopySelectionBubbleWindow(this);
+        int logicalW = _displays.WidthOf(id) ?? ScreenFit.DesignWidth;
+        double scale = ScreenFit.Scale(logicalW);
+        double dpiRatio = Math.Max(1.0, bounds.Width / Math.Max(1.0, logicalW));
+        _copyBubbleWindow.ShowAtSelection(selectionEnd, bounds, scale, dpiRatio);
+    }
+
+    public async Task CopySelectionAtAsync(PointD point)
+    {
+        await _windows.CopySelectionAtAsync(point);
     }
 
     public void SyncSubPageActivation(bool focus)
@@ -403,6 +431,7 @@ public sealed class AppController : ILogSink
 
     private void HideAndDisposeScreenshotWindows()
     {
+        _copyBubbleWindow?.HideBubble();
         _screenshotOverlayWindow?.Close();
         _screenshotOverlayWindow = null;
         _cropWindow?.Close();
@@ -421,6 +450,39 @@ public sealed class AppController : ILogSink
     public void SetGesturesEnabled(bool enabled)
     {
         _config = _config with { Gestures = enabled };
+        _configStore.Save(_config);
+        SyncTouchRegion();
+        UiStateChanged?.Invoke();
+    }
+
+    public void SetGestureScrollEnabled(bool enabled)
+    {
+        _config = _config with { GestureScroll = enabled };
+        _configStore.Save(_config);
+        SyncTouchRegion();
+        UiStateChanged?.Invoke();
+    }
+
+    public void SetGestureLongPressRightClickEnabled(bool enabled)
+    {
+        _config = _config with { GestureLongPressRightClick = enabled };
+        _configStore.Save(_config);
+        SyncTouchRegion();
+        UiStateChanged?.Invoke();
+    }
+
+    public void SetCopyAfterSelectionEnabled(bool enabled)
+    {
+        _config = _config with { CopyAfterSelection = enabled };
+        _configStore.Save(_config);
+        if (!enabled) _copyBubbleWindow?.HideBubble();
+        SyncTouchRegion();
+        UiStateChanged?.Invoke();
+    }
+
+    public void SetGesturesInjectedOnlyEnabled(bool enabled)
+    {
+        _config = _config with { GesturesInjectedOnly = enabled };
         _configStore.Save(_config);
         SyncTouchRegion();
         UiStateChanged?.Invoke();
@@ -555,6 +617,7 @@ public sealed class AppController : ILogSink
         await _desk.ShutdownAsync();
         await _displays.DisposeAsync();
         HideAndDisposeScreenshotWindows();
+        _copyBubbleWindow?.Close();
         _phoneHomeWindow?.Close();
         _homeBarWindow?.Close();
     }

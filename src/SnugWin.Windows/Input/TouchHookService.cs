@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
 using SnugWin.Core.PhoneScreen;
@@ -22,8 +23,12 @@ public sealed class TouchHookService : IDisposable
 
     private TouchRegion? _region;
     private TouchTranslator _translator;
-    private bool _requireInjectedFlag;
+    private TouchOptions _options = TouchOptions.Default;
+    private PointD _heldPressPoint;
+    private bool _passthroughBrowserChrome;
+    private bool _requireInjectedFlag = true;
     private bool _loggedFirstFlag;
+    private readonly Dictionary<int, string> _pidExeCache = new();
 
     private Thread? _hookThread;
     private uint _hookThreadId;
@@ -35,11 +40,19 @@ public sealed class TouchHookService : IDisposable
     private Thread? _replayThread;
 
     public event Action<ulong>? CloseWindowRequested;
+    public event Action<PointD>? SelectionCompleted;
+    public event Action? SelectionDismissed;
 
     public bool RequireInjectedFlag
     {
         get { lock (_gate) return _requireInjectedFlag; }
         set { lock (_gate) _requireInjectedFlag = value; }
+    }
+
+    public TouchOptions Options
+    {
+        get { lock (_gate) return _options; }
+        set { lock (_gate) _options = value; }
     }
 
     public bool IsRunning => _hookHandle != IntPtr.Zero;
@@ -194,6 +207,9 @@ public sealed class TouchHookService : IDisposable
         TouchRegion? region;
         TouchResponse response;
         bool coasting;
+        PointD pressOrigin;
+        PointD currentPoint = new(info.pt.X, info.pt.Y);
+        bool dismissSelectionBubble = false;
         lock (_gate)
         {
             region = _region;
@@ -201,7 +217,7 @@ public sealed class TouchHookService : IDisposable
                 return Win32.CallNextHookEx(_hookHandle, nCode, wParam, lParam);
 
             bool injected = (info.flags & Win32.LLMHF_INJECTED) != 0;
-            if (!_loggedFirstFlag && kind == TouchInputKind.Press && region.Frame.Contains(new PointD(info.pt.X, info.pt.Y)))
+            if (!_loggedFirstFlag && kind == TouchInputKind.Press && region.Frame.Contains(currentPoint))
             {
                 _loggedFirstFlag = true;
                 Log.Info($"手机屏首次按下事件 flags=0x{info.flags:X} (injected={injected})");
@@ -210,18 +226,36 @@ public sealed class TouchHookService : IDisposable
             if (_requireInjectedFlag && !injected)
                 return Win32.CallNextHookEx(_hookHandle, nCode, wParam, lParam);
 
+            if (kind == TouchInputKind.Press)
+            {
+                dismissSelectionBubble = region.Frame.Contains(currentPoint);
+                _passthroughBrowserChrome = region.Frame.Contains(currentPoint) && IsNativeBrowserChrome(currentPoint, region.Scale);
+            }
+            if (_passthroughBrowserChrome)
+            {
+                if (kind == TouchInputKind.Release) _passthroughBrowserChrome = false;
+                return Win32.CallNextHookEx(_hookHandle, nCode, wParam, lParam);
+            }
+
             double now = Stopwatch.GetElapsedTime(_startTick).TotalSeconds;
-            var input = new TouchInput(kind.Value, new PointD(info.pt.X, info.pt.Y), now);
-            response = _translator.Handle(input, region);
+            var input = new TouchInput(kind.Value, currentPoint, now);
+            response = _translator.Handle(input, region, _options);
+            if (kind == TouchInputKind.Press && !response.PassOriginal)
+                _heldPressPoint = currentPoint;
+            pressOrigin = _heldPressPoint;
+            if (kind == TouchInputKind.Release)
+                _heldPressPoint = default;
             coasting = _translator.IsCoasting;
         }
+
+        if (dismissSelectionBubble)
+            SelectionDismissed?.Invoke();
 
         if (response.Commands.Count > 0)
         {
             var q = _replayQueue;
             var commands = response.Commands;
             var curKind = kind.Value;
-            PointD pressOrigin = new(info.pt.X, info.pt.Y);
             if (q is not null && !q.IsAddingCompleted)
             {
                 q.TryAdd(() =>
@@ -229,9 +263,9 @@ public sealed class TouchHookService : IDisposable
                     bool hasPress = false;
                     foreach (var cmd in commands)
                     {
-                        if (hasPress && cmd is TouchCommand.ReplayCurrent && curKind == TouchInputKind.Release)
-                            Thread.Sleep(10);
-                        ExecuteCommand(cmd, curKind, pressOrigin, region);
+                        if (hasPress && cmd is TouchCommand.ReplayCurrent)
+                            Thread.Sleep(curKind == TouchInputKind.Release ? 10 : 4);
+                        ExecuteCommand(cmd, curKind, pressOrigin, currentPoint, region);
                         if (cmd is TouchCommand.ReplayPress) hasPress = true;
                     }
                 });
@@ -245,12 +279,12 @@ public sealed class TouchHookService : IDisposable
             : new IntPtr(1);
     }
 
-    private void ExecuteCommand(TouchCommand cmd, TouchInputKind currentKind, PointD currentPoint, TouchRegion? region)
+    private void ExecuteCommand(TouchCommand cmd, TouchInputKind currentKind, PointD heldPressPoint, PointD currentPoint, TouchRegion? region)
     {
         switch (cmd)
         {
             case TouchCommand.ReplayPress:
-                SendMouseClick(currentPoint, down: true, right: false);
+                SendMouseClick(heldPressPoint, down: true, right: false);
                 break;
 
             case TouchCommand.ReplayCurrent:
@@ -273,7 +307,41 @@ public sealed class TouchHookService : IDisposable
             case TouchCommand.CloseWindow cw:
                 HandleCloseTap(cw.At, region?.CloseButton);
                 break;
+
+            case TouchCommand.SelectionCompleted sel:
+                SelectionCompleted?.Invoke(sel.At);
+                break;
         }
+    }
+
+    private bool IsNativeBrowserChrome(PointD point, double scale)
+    {
+        IntPtr hit = Win32.WindowFromPoint(new Win32.POINT { X = (int)Math.Round(point.X), Y = (int)Math.Round(point.Y) });
+        if (hit == IntPtr.Zero) return false;
+        IntPtr root = Win32.GetAncestor(hit, Win32.GA_ROOT);
+        if (root == IntPtr.Zero || !Win32.GetWindowRect(root, out var rect)) return false;
+
+        Win32.GetWindowThreadProcessId(root, out int pid);
+        if (pid <= 0 || pid == Environment.ProcessId) return false;
+
+        if (!_pidExeCache.TryGetValue(pid, out string? exe))
+        {
+            string? path = Win32.GetProcessImagePath(pid);
+            exe = string.IsNullOrEmpty(path) ? string.Empty : Path.GetFileName(path);
+            if (_pidExeCache.Count > 64) _pidExeCache.Clear();
+            _pidExeCache[pid] = exe;
+        }
+
+        bool isBrowser = exe.Equals("msedge.exe", StringComparison.OrdinalIgnoreCase)
+                         || exe.Equals("chrome.exe", StringComparison.OrdinalIgnoreCase)
+                         || exe.Equals("brave.exe", StringComparison.OrdinalIgnoreCase)
+                         || exe.Equals("opera.exe", StringComparison.OrdinalIgnoreCase)
+                         || exe.Equals("vivaldi.exe", StringComparison.OrdinalIgnoreCase)
+                         || exe.Equals("firefox.exe", StringComparison.OrdinalIgnoreCase);
+        if (!isBrowser) return false;
+
+        double chromeHeight = 120.0 * Math.Max(1.0, scale);
+        return point.Y >= rect.Top && point.Y <= rect.Top + chromeHeight;
     }
 
     private void HandleCloseTap(PointD at, CloseButton? button)

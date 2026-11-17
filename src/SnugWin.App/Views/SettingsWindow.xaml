@@ -37,12 +37,20 @@
             <StackPanel>
                 <CheckBox x:Name="PhoneScreenCheck" Content="手机远程时自动创建「Snug 手机屏」" Foreground="#F1F5F9" FontSize="13.5" Margin="0,0,0,8"
                           Checked="OnPhoneScreenChanged" Unchecked="OnPhoneScreenChanged"/>
-                <CheckBox x:Name="GesturesCheck" Content="在手机屏内开启原生手势（单指滚动 / 惯性 / 长按右键）" Foreground="#F1F5F9" FontSize="13.5" Margin="0,0,0,8"
+                <CheckBox x:Name="GesturesCheck" Content="在手机屏内开启原生手势总开关" Foreground="#F1F5F9" FontSize="13.5" Margin="0,0,0,6"
                           Checked="OnGesturesChanged" Unchecked="OnGesturesChanged"/>
+                <StackPanel Margin="22,0,0,8">
+                    <CheckBox x:Name="GestureScrollCheck" Content="单指滑动转为滚轮滚动与惯性" Foreground="#CBD5E1" FontSize="12.5" Margin="0,0,0,5"
+                              Checked="OnGestureScrollChanged" Unchecked="OnGestureScrollChanged"/>
+                    <CheckBox x:Name="GestureRightClickCheck" Content="长按松开触发右键菜单（在 PowerShell 中可取消勾选以防误粘贴）" Foreground="#CBD5E1" FontSize="12.5" Margin="0,0,0,5"
+                              Checked="OnGestureRightClickChanged" Unchecked="OnGestureRightClickChanged"/>
+                    <CheckBox x:Name="CopyAfterSelectionCheck" Content="划选文本松手后显示悬浮「复制」按钮（终端自动安全发送 Ctrl+Shift+C）" Foreground="#CBD5E1" FontSize="12.5" Margin="0,0,0,5"
+                              Checked="OnCopyAfterSelectionChanged" Unchecked="OnCopyAfterSelectionChanged"/>
+                    <CheckBox x:Name="InjectedOnlyCheck" Content="仅接管 UU 注入触控事件 (保留本机物理鼠标跨屏直操作)" Foreground="#CBD5E1" FontSize="12.5"
+                              Checked="OnInjectedOnlyChanged" Unchecked="OnInjectedOnlyChanged"/>
+                </StackPanel>
                 <CheckBox x:Name="ScreenshotCheck" Content="在手机屏底部小横条左边放相机键（截图当前窗口到剪贴板，点缩略图可裁剪）" Foreground="#F1F5F9" FontSize="13.5" Margin="0,0,0,8"
                           Checked="OnScreenshotChanged" Unchecked="OnScreenshotChanged"/>
-                <CheckBox x:Name="InjectedOnlyCheck" Content="仅接管系统注入的鼠标事件 (LLMHF_INJECTED)" Foreground="#CBD5E1" FontSize="12.5" Margin="0,0,0,8"
-                          Checked="OnInjectedOnlyChanged" Unchecked="OnInjectedOnlyChanged"/>
                 <CheckBox x:Name="ManualPhoneCheck" Content="手动强制开启手机屏（测试驱动 / 自动识别兜底）" Foreground="#93C5FD" FontSize="13"
                           Checked="OnManualChanged" Unchecked="OnManualChanged"/>
             </StackPanel>

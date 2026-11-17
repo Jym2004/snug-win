@@ -77,7 +77,9 @@ public static unsafe partial class Win32
     public const ushort VK_SHIFT = 0x10;
     public const ushort VK_OEM_PLUS = 0xBB;
     public const ushort VK_OEM_MINUS = 0xBD;
+    public const ushort VK_C = 0x43;
     public const ushort VK_N = 0x4E;
+    public const uint GA_ROOT = 2;
 
     public const int SM_XVIRTUALSCREEN = 76;
     public const int SM_YVIRTUALSCREEN = 77;
@@ -475,6 +477,12 @@ public static unsafe partial class Win32
 
     [DllImport("user32.dll")]
     public static extern IntPtr SendMessageTimeoutW(IntPtr hWnd, uint Msg, nuint wParam, nint lParam, uint fuFlags, uint uTimeout, out nuint lpdwResult);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr WindowFromPoint(POINT Point);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetAncestor(IntPtr hwnd, uint gaFlags);
 
     [DllImport("user32.dll")]
     public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);

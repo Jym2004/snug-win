@@ -403,6 +403,29 @@ public sealed class WindowService : IWindowControl
         Win32.SendInput((uint)arr.Length, arr, Marshal.SizeOf<Win32.INPUT>());
     }
 
+    public async Task CopySelectionAtAsync(PointD point)
+    {
+        IntPtr hit = Win32.WindowFromPoint(new Win32.POINT { X = (int)Math.Round(point.X), Y = (int)Math.Round(point.Y) });
+        IntPtr root = hit != IntPtr.Zero ? Win32.GetAncestor(hit, Win32.GA_ROOT) : IntPtr.Zero;
+        if (root == IntPtr.Zero) root = hit;
+        if (root == IntPtr.Zero) return;
+
+        Win32.GetWindowThreadProcessId(root, out int pid);
+        string cls = Win32.GetWindowClass(root);
+        string? exe = pid > 0 ? Path.GetFileName(Win32.GetProcessImagePath(pid)) : null;
+
+        bool isTerminal = cls is "CASCADIA_HOSTING_WINDOW_CLASS" or "ConsoleWindowClass"
+                          || string.Equals(exe, "WindowsTerminal.exe", StringComparison.OrdinalIgnoreCase)
+                          || string.Equals(exe, "OpenConsole.exe", StringComparison.OrdinalIgnoreCase)
+                          || string.Equals(exe, "powershell.exe", StringComparison.OrdinalIgnoreCase)
+                          || string.Equals(exe, "pwsh.exe", StringComparison.OrdinalIgnoreCase)
+                          || string.Equals(exe, "cmd.exe", StringComparison.OrdinalIgnoreCase);
+
+        await FocusAsync(new WindowKey(pid, (ulong)root)).ConfigureAwait(false);
+        await Task.Delay(35).ConfigureAwait(false);
+        SendCtrlShortcut(Win32.VK_C, withShift: isTerminal);
+    }
+
     private static Win32.INPUT KeyInput(ushort vk, bool down) => new()
     {
         type = Win32.INPUT_KEYBOARD,
