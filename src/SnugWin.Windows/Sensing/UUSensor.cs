@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using SnugWin.Core.Session;
+using SnugWin.Core.Support;
 using SnugWin.Windows.Native;
 using SnugWin.Windows.Windows;
 
@@ -14,17 +15,17 @@ namespace SnugWin.Windows.Sensing;
 /// Observes NetEase UU Remote (GameViewer) on Windows via multiple local signals:
 /// 1. Visible windows owned by GameViewerServer (if floating ball/overlay is enabled);
 /// 2. UI Automation inspection of GameViewer main window ("本机被控中" controller list);
-/// 3. Active non-443/non-80 TCP peer connections on GameViewerServer (e.g. LAN/relay stream)
-///    or sustained GameViewerServer CPU encoding activity;
-/// 4. Active byte growth of GameViewerServer streamer log (streamer_log_controlled_*_<pid>.slog).
+/// 3. Active non-443/non-80 TCP peer connections on GameViewerServer (e.g. LAN/relay stream);
+/// 4. Continuous byte growth of GameViewerServer streamer log (streamer_log_controlled_*_<pid>.slog).
 /// </summary>
 public sealed class UUSensor
 {
-    private static readonly string ServerLogDir = @"C:\Program Files\Netease\GameViewer\log\server\log";
     private DateTimeOffset _prevLogSizeAdvance = DateTimeOffset.MinValue;
     private DateTimeOffset _lastLogSizeAdvance = DateTimeOffset.MinValue;
     private long _lastObservedLogBytes = -1;
     private int _lastServerPid;
+    private string? _resolvedLogDir;
+    private bool _loggedLogReadError;
 
     public bool ManualOverride { get; set; }
 
@@ -103,6 +104,7 @@ public sealed class UUSensor
             _lastObservedLogBytes = -1;
             _prevLogSizeAdvance = DateTimeOffset.MinValue;
             _lastLogSizeAdvance = DateTimeOffset.MinValue;
+            _resolvedLogDir = null;
             return false;
         }
 
@@ -112,6 +114,8 @@ public sealed class UUSensor
             _lastObservedLogBytes = -1;
             _prevLogSizeAdvance = DateTimeOffset.MinValue;
             _lastLogSizeAdvance = DateTimeOffset.MinValue;
+            _resolvedLogDir = ResolveServerLogDir(pid);
+            _loggedLogReadError = false;
         }
 
         // Signal A: GameViewerServer has an established non-443/non-80 peer TCP connection (e.g. port 2533/2091)
@@ -120,11 +124,12 @@ public sealed class UUSensor
 
         // Signal B: continuous byte growth of streamer_log_controlled_*_<pid>.slog (>= 2 writes within 3s, max 2s hold)
         // A single isolated log flush (idle heartbeat / post-disconnect stats flush) must NOT trigger a phantom session.
-        if (Directory.Exists(ServerLogDir))
+        string? logDir = _resolvedLogDir ??= ResolveServerLogDir(pid);
+        if (!string.IsNullOrEmpty(logDir) && Directory.Exists(logDir))
         {
             try
             {
-                var files = Directory.EnumerateFiles(ServerLogDir, $"streamer_log_controlled_*_{pid}.slog")
+                var files = Directory.EnumerateFiles(logDir, $"streamer_log_controlled_*_{pid}.slog")
                     .Select(p => new FileInfo(p))
                     .ToList();
                 if (files.Count > 0)
@@ -147,13 +152,46 @@ public sealed class UUSensor
                         return true;
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // ignore log directory error
+                if (!_loggedLogReadError)
+                {
+                    _loggedLogReadError = true;
+                    Log.Warn($"读取 UU 推流日志目录失败（{logDir}）：{ex.Message}");
+                }
             }
         }
 
         return false;
+    }
+
+    private static string? ResolveServerLogDir(int serverPid)
+    {
+        var candidates = new List<string>();
+        string? serverExe = Win32.GetProcessImagePath(serverPid);
+        if (!string.IsNullOrEmpty(serverExe))
+        {
+            string? serverDir = Path.GetDirectoryName(serverExe);
+            if (!string.IsNullOrEmpty(serverDir))
+            {
+                candidates.Add(Path.Combine(serverDir, "log"));
+                string? parentDir = Directory.GetParent(serverDir)?.FullName;
+                if (!string.IsNullOrEmpty(parentDir))
+                {
+                    candidates.Add(Path.Combine(parentDir, "log", "server", "log"));
+                    candidates.Add(Path.Combine(parentDir, "log"));
+                }
+            }
+        }
+
+        string programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        if (!string.IsNullOrEmpty(programFiles))
+            candidates.Add(Path.Combine(programFiles, "Netease", "GameViewer", "log", "server", "log"));
+        candidates.Add(@"C:\Program Files\Netease\GameViewer\log\server\log");
+        candidates.Add(@"D:\Program Files\Netease\GameViewer\log\server\log");
+        candidates.Add(@"D:\GameViewer\log\server\log");
+
+        return candidates.FirstOrDefault(Directory.Exists);
     }
 
     [DllImport("iphlpapi.dll", SetLastError = true)]

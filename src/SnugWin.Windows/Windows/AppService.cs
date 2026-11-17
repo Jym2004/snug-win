@@ -52,13 +52,15 @@ public sealed class AppService : IAppControl
 
     public Task<IReadOnlyList<WindowInfo>> AppWindowsAsync(AppInfo app, int? launchedPid = null)
     {
-        string targetExe = Path.GetFileName(app.ExecutablePath ?? app.AppId);
+        bool isUwp = app.AppId.Contains('!');
+        string targetExe = isUwp ? string.Empty : Path.GetFileName(app.ExecutablePath ?? app.AppId);
         string? targetDir = !string.IsNullOrEmpty(app.ExecutablePath) ? Path.GetDirectoryName(app.ExecutablePath) : null;
         var all = WindowService.EnumerateStandardWindows(pidFilter: null, includeMinimized: false);
         var matched = all.Where(w =>
         {
-            if (launchedPid is { } lp && w.Key.Pid == lp) return true;
-            if (!string.IsNullOrEmpty(w.AppId) && w.AppId.Equals(targetExe, StringComparison.OrdinalIgnoreCase))
+            if (launchedPid is { } lp && lp > 0 && w.Key.Pid == lp) return true;
+            if (!string.IsNullOrEmpty(targetExe) && !string.IsNullOrEmpty(w.AppId)
+                && w.AppId.Equals(targetExe, StringComparison.OrdinalIgnoreCase))
                 return true;
             if (!string.IsNullOrEmpty(targetDir))
             {
@@ -66,6 +68,9 @@ public sealed class AppService : IAppControl
                 if (!string.IsNullOrEmpty(img) && img.StartsWith(targetDir, StringComparison.OrdinalIgnoreCase))
                     return true;
             }
+            if (isUwp && (w.Title.Contains(app.Name, StringComparison.OrdinalIgnoreCase)
+                          || w.AppName.Contains(app.Name, StringComparison.OrdinalIgnoreCase)))
+                return true;
             return false;
         }).ToList();
         return Task.FromResult<IReadOnlyList<WindowInfo>>(matched);
@@ -86,10 +91,13 @@ public sealed class AppService : IAppControl
             if (proc is not null && !proc.HasExited)
                 return Task.FromResult<int?>(proc.Id);
 
+            if (app.AppId.Contains('!'))
+                return Task.FromResult<int?>(0);
+
             // Launcher/shell-execute might hand off to existing process; find by exe name
             string exeName = Path.GetFileNameWithoutExtension(app.ExecutablePath ?? app.AppId);
             var found = Process.GetProcessesByName(exeName).FirstOrDefault();
-            return Task.FromResult<int?>(found?.Id);
+            return Task.FromResult<int?>(found?.Id ?? 0);
         }
         catch (Exception ex)
         {
@@ -240,7 +248,81 @@ public sealed class AppService : IAppControl
         ScanAppPaths(Registry.LocalMachine, map);
         ScanAppPaths(Registry.CurrentUser, map);
 
+        // 3. Scan shell:AppsFolder (captures Microsoft Store / UWP apps like Windows Terminal, Calculator, Settings)
+        ScanAppsFolder(map);
+
         return AppList.Sorted(map.Values);
+    }
+
+    private static void ScanAppsFolder(Dictionary<string, AppInfo> map)
+    {
+        var existingNames = map.Values
+            .Select(a => a.Name)
+            .ToHashSet(StringComparer.CurrentCultureIgnoreCase);
+        var entries = new List<(string Name, string Target)>();
+
+        void Enumerate()
+        {
+            try
+            {
+                var shellType = Type.GetTypeFromProgID("Shell.Application");
+                if (shellType is null) return;
+                dynamic? shell = Activator.CreateInstance(shellType);
+                if (shell is null) return;
+                try
+                {
+                    dynamic? folder = shell.NameSpace("shell:AppsFolder");
+                    if (folder is null) return;
+                    dynamic items = folder.Items();
+                    foreach (dynamic item in items)
+                    {
+                        string? name = item.Name as string;
+                        string? path = item.Path as string;
+                        if (!string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(path))
+                            entries.Add((name.Trim(), path.Trim()));
+                    }
+                }
+                finally
+                {
+                    Marshal.FinalReleaseComObject(shell);
+                }
+            }
+            catch
+            {
+                // ignore shell enumeration failures
+            }
+        }
+
+        var t = new System.Threading.Thread(Enumerate);
+        t.SetApartmentState(System.Threading.ApartmentState.STA);
+        t.Start();
+        t.Join(4000);
+
+        foreach (var (name, target) in entries)
+        {
+            if (IsIgnoredShortcutName(name) || existingNames.Contains(name)) continue;
+
+            if (target.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) && File.Exists(target))
+            {
+                string exe = Path.GetFileName(target);
+                if (WindowService.IsExcludedApp(exe) || IsInstallerOrHelper(exe, name)) continue;
+                if (map.TryAdd(exe, new AppInfo(exe, name, target, target)))
+                    existingNames.Add(name);
+            }
+            else if (target.Contains('!'))
+            {
+                // UWP AUMID (e.g. Microsoft.WindowsTerminal_8wekyb3d8bbwe!App)
+                if (map.TryAdd(target, new AppInfo(
+                        target,
+                        name,
+                        null,
+                        "explorer.exe",
+                        $@"shell:AppsFolder\{target}")))
+                {
+                    existingNames.Add(name);
+                }
+            }
+        }
     }
 
     private static void ScanAppPaths(RegistryKey root, Dictionary<string, AppInfo> map)
