@@ -1,0 +1,147 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要发布的 tag（须已推送到远程，如 v1.1.1）'
+        required: true
+      draft:
+        description: '创建为草稿（不公开）'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: publish (${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }})
+    runs-on: windows-latest
+    env:
+      VDD_ZIP_URL: https://github.com/MolotovCherry/virtual-display-rs/releases/download/v0.3.1/virtual-desktop-driver-installer-x64.zip
+      VDD_ZIP_SHA256: B3E3A5AB9B49BD56A7E753120CDDB1D913479BC5C0DFA781C3D43392DDE2FB75
+
+    steps:
+      - name: Resolve tag and version
+        id: meta
+        shell: pwsh
+        run: |
+          $tag = '${{ github.event_name == 'workflow_dispatch' && inputs.tag || '' }}'
+          if ([string]::IsNullOrWhiteSpace($tag)) { $tag = '${{ github.ref_name }}' }
+          $version = $tag.TrimStart('v')
+          if ($version -notmatch '^\d+\.\d+\.\d+') { throw "无法从 tag '$tag' 解析版本号" }
+          "tag=$tag"           >> $env:GITHUB_OUTPUT
+          "version=$version"   >> $env:GITHUB_OUTPUT
+          Write-Host "tag=$tag version=$version"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          fetch-depth: 1
+
+      - name: Set up .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.404'
+          cache: true
+          cache-dependency-path: '**/*.csproj'
+
+      - name: Restore
+        run: dotnet restore SnugWin.sln
+
+      - name: Build (warnings are errors)
+        run: dotnet build SnugWin.sln -c Release --no-restore -warnaserror -p:Version=${{ steps.meta.outputs.version }}
+
+      - name: Test
+        run: dotnet test SnugWin.sln -c Release --no-build
+
+      - name: Publish (self-contained)
+        run: dotnet publish src\SnugWin.App\SnugWin.App.csproj -c Release -r win-x64 --self-contained true -p:Version=${{ steps.meta.outputs.version }} -o dist\win-x64
+
+      - name: Publish (framework-dependent)
+        run: dotnet publish src\SnugWin.App\SnugWin.App.csproj -c Release -r win-x64 --self-contained false -p:Version=${{ steps.meta.outputs.version }} -o dist\win-x64-fdd
+
+      - name: Fetch virtual-display-rs driver package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path driver\installer | Out-Null
+          $zip = Join-Path 'driver' 'virtual-desktop-driver-installer-x64.zip'
+          Invoke-WebRequest $env:VDD_ZIP_URL -OutFile $zip -UseBasicParsing
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash
+          if ($hash -ne $env:VDD_ZIP_SHA256) { throw "驱动包 SHA256 校验失败: $hash" }
+          Expand-Archive -Path $zip -DestinationPath 'driver\installer' -Force
+          Get-ChildItem 'driver\installer' | Select-Object Name, Length | Format-Table -AutoSize
+
+      - name: Assemble packages
+        shell: pwsh
+        run: |
+          $version = '${{ steps.meta.outputs.version }}'
+          $stage = 'dist\stage'
+          New-Item -ItemType Directory -Force -Path "$stage\self", "$stage\fdd", "$stage\driver" | Out-Null
+
+          Copy-Item 'dist\win-x64\*' "$stage\self\" -Recurse -Force
+          Copy-Item 'dist\win-x64-fdd\*' "$stage\fdd\" -Recurse -Force
+          Get-ChildItem $stage -Recurse -Filter *.pdb | Remove-Item -Force
+
+          & "$PWD\.github\quickstart.ps1" -Version $version -Target "$stage\self" -FrameworkDependent:$false
+          & "$PWD\.github\quickstart.ps1" -Version $version -Target "$stage\fdd"  -FrameworkDependent:$true
+
+          Copy-Item 'driver\install-driver.cmd'                        "$stage\driver\" -Force
+          Copy-Item 'driver\Install-SnugDriver.ps1'                    "$stage\driver\" -Force
+          Copy-Item 'driver\virtual-desktop-driver-installer-x64.zip'  "$stage\driver\" -Force
+          Copy-Item 'driver\installer'                                 "$stage\driver\installer" -Recurse -Force
+
+      - name: Zip assets
+        shell: pwsh
+        run: |
+          $version = '${{ steps.meta.outputs.version }}'
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $map = [ordered]@{
+            "dist\SnugWin-v$version-win-x64-selfcontained.zip"      = 'dist\stage\self'
+            "dist\SnugWin-v$version-win-x64-frameworkdependent.zip" = 'dist\stage\fdd'
+            'dist\virtual-display-driver-0.3.1-x64.zip'             = 'dist\stage\driver'
+          }
+          foreach ($out in $map.Keys) {
+            if (Test-Path $out) { Remove-Item $out -Force }
+            [System.IO.Compression.ZipFile]::CreateFromDirectory($map[$out], $out, [System.IO.Compression.CompressionLevel]::Optimal, $false)
+            Write-Host ("{0}  {1:N2} MB" -f (Split-Path $out -Leaf), ((Get-Item $out).Length / 1MB))
+          }
+
+      - name: Generate checksums and release notes
+        shell: pwsh
+        run: |
+          $version = '${{ steps.meta.outputs.version }}'
+          $zips = Get-ChildItem 'dist' -Filter '*.zip'
+          $lines = @(foreach ($z in $zips) { '{0}  {1}' -f (Get-FileHash $z.FullName -Algorithm SHA256).Hash, $z.Name })
+          $lines | Set-Content 'dist\checksums.txt' -Encoding UTF8
+          $lines | ForEach-Object { Write-Host $_ }
+
+          $fence = '```'
+          $tail = @('', '### 校验和', '', ($fence + 'text')) + $lines + @($fence, '')
+          $template = Get-Content '.github\release-notes-template.md' -Raw
+          $body = $template.Replace('{{VERSION}}', $version) + ($tail -join "`r`n")
+          Set-Content 'dist\release-notes.md' -Value $body -Encoding UTF8
+          Write-Host "release notes: $((Get-Item 'dist\release-notes.md').Length) bytes"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: SnugWin v${{ steps.meta.outputs.version }}
+          body_path: dist/release-notes.md
+          draft: ${{ github.event_name == 'workflow_dispatch' && inputs.draft || false }}
+          prerelease: false
+          fail_on_unmatched_files: true
+          files: |
+            dist/SnugWin-v${{ steps.meta.outputs.version }}-win-x64-selfcontained.zip
+            dist/SnugWin-v${{ steps.meta.outputs.version }}-win-x64-frameworkdependent.zip
+            dist/virtual-display-driver-0.3.1-x64.zip
+            dist/checksums.txt

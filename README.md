@@ -1,5 +1,8 @@
 # SnugWin
 
+[![CI](https://github.com/nicocart/snug-win/actions/workflows/ci.yml/badge.svg)](https://github.com/nicocart/snug-win/actions/workflows/ci.yml)
+[![Release](https://github.com/nicocart/snug-win/actions/workflows/release.yml/badge.svg)](https://github.com/nicocart/snug-win/actions/workflows/release.yml)
+
 **让 Windows 在手机上拥有原生级操作体验的 UU远程 伴侣（C# / .NET 10 LTS / WPF + virtual-display-rs）**
 
 承接并 1:1 遵循 [zephyr4123/snug](https://github.com/zephyr4123/snug)（MIT License，`v2.5.0`）的产品体验、状态机与交互逻辑，为 Windows 10/11 + 网易 UU远程（GameViewer）实现。
@@ -66,6 +69,13 @@ dotnet build SnugWin.sln -c Release
 dotnet test SnugWin.sln -c Release --no-build
 dotnet publish src\SnugWin.App\SnugWin.App.csproj -c Release -r win-x64 --self-contained true -o publish-out
 ```
+
+发版由 GitHub Actions 完成，不用手工打包：
+
+* `ci.yml`：`main` 的每次推送与 PR 都跑一次 build（`-warnaserror`）+ 全部测试，红灯即视为不可合并
+* `release.yml`：推送 `v*` tag 自动走 build → test → publish（自包含 + 框架依赖）→ 拉取并校验 virtual-display-rs 0.3.1 → 打三个 zip → 生成校验和 → 创建 Release 并上传资产
+  * 也可在 Actions 页手动 `Run workflow`，填 tag 与 `draft` 选项
+  * 驱动包不入库（`.gitignore` 排除 msi/证书），CI 直接从上游 release 下载并按 SHA256 校验后打进驱动包
 
 ## 开源致谢与第三方声明
 
