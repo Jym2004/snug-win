@@ -34,7 +34,7 @@
 | `virtual-display-driver-0.3.1-x64.zip` | 绿色版首次使用必装 | 虚拟显示器驱动 + 校验安装脚本 `install-driver.cmd`（`setup.exe` 安装包用户已内置，无需另下） |
 | `checksums.txt` | 安全校验 | 所有发布资产的 SHA-256 校验和 |
 
-> 如当前最新版本为 `v1.1.1`（尚无 `setup.exe`），可直接使用 `SnugWin-v1.1.1-win-x64-selfcontained.zip` + `virtual-display-driver-0.3.1-x64.zip`；后续 tag 发版将自动附上 `setup.exe` 安装包。
+> 从 `v1.2.0` 起，每个版本都同时提供 `setup.exe` 一键安装包（内置驱动安装与自启选项）和绿色便携 zip。
 
 ---
 
