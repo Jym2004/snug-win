@@ -10,3 +10,4 @@ driver/*.zip
 driver/**/*.msi
 driver/**/*.cer
 driver/**/*.bat
+dist/
