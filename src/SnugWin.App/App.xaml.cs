@@ -24,6 +24,8 @@ public partial class App : System.Windows.Application
     private System.Drawing.Icon? _connectedTrayIcon;
     private System.Windows.Forms.ToolStripMenuItem? _statusMenuItem;
     private System.Windows.Forms.ToolStripMenuItem? _manualPhoneMenuItem;
+    private System.Windows.Forms.ToolStripMenuItem? _updateMenuItem;
+    private bool _notifiedUpdate;
     private SettingsWindow? _settingsWindow;
 
     protected override void OnStartup(StartupEventArgs e)
@@ -58,6 +60,31 @@ public partial class App : System.Windows.Application
             });
         };
 
+        _controller.UpdateStatusChanged += upd =>
+        {
+            Dispatcher.BeginInvoke(() =>
+            {
+                if (upd is not null && upd.HasUpdate)
+                {
+                    if (_updateMenuItem is not null)
+                        _updateMenuItem.Text = $"发现新版本 v{upd.LatestVersion}（点击更新）";
+                    if (!_notifiedUpdate && _trayIcon is not null)
+                    {
+                        _notifiedUpdate = true;
+                        _trayIcon.ShowBalloonTip(
+                            3500,
+                            $"SnugWin v{upd.LatestVersion} 已发布",
+                            "点击托盘「关于与更新」可一键校验并升级。",
+                            System.Windows.Forms.ToolTipIcon.Info);
+                    }
+                }
+                else if (_updateMenuItem is not null)
+                {
+                    _updateMenuItem.Text = "检查更新...";
+                }
+            });
+        };
+
         // Show Settings on manual startup (unless --minimized is passed for autostart)
         bool minimized = Array.Exists(e.Args, a => a.Equals("--minimized", StringComparison.OrdinalIgnoreCase));
         if (!minimized)
@@ -72,8 +99,12 @@ public partial class App : System.Windows.Application
         menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
 
         var openSettings = new System.Windows.Forms.ToolStripMenuItem("打开设置与诊断...");
-        openSettings.Click += (_, _) => Dispatcher.Invoke(ShowSettings);
+        openSettings.Click += (_, _) => Dispatcher.Invoke(() => ShowSettings(0));
         menu.Items.Add(openSettings);
+
+        _updateMenuItem = new System.Windows.Forms.ToolStripMenuItem("检查更新...");
+        _updateMenuItem.Click += (_, _) => Dispatcher.Invoke(() => ShowSettings(3));
+        menu.Items.Add(_updateMenuItem);
 
         _manualPhoneMenuItem = new System.Windows.Forms.ToolStripMenuItem("手动开启手机屏（测试/兜底）")
         {
@@ -108,7 +139,8 @@ public partial class App : System.Windows.Application
             ContextMenuStrip = menu,
             Visible = true
         };
-        _trayIcon.DoubleClick += (_, _) => Dispatcher.Invoke(ShowSettings);
+        _trayIcon.DoubleClick += (_, _) => Dispatcher.Invoke(() => ShowSettings(0));
+        _trayIcon.BalloonTipClicked += (_, _) => Dispatcher.Invoke(() => ShowSettings(3));
     }
 
     private static System.Drawing.Icon? LoadResourceIcon(string relativeUri)
@@ -126,17 +158,18 @@ public partial class App : System.Windows.Application
         }
     }
 
-    private void ShowSettings()
+    private void ShowSettings(int initialTab = 0)
     {
         if (_controller is null) return;
         if (_settingsWindow is null || !_settingsWindow.IsLoaded)
         {
-            _settingsWindow = new SettingsWindow(_controller);
+            _settingsWindow = new SettingsWindow(_controller, initialTab);
             _settingsWindow.Closed += (_, _) => _settingsWindow = null;
             _settingsWindow.Show();
         }
         else
         {
+            _settingsWindow.SelectTab(initialTab);
             if (_settingsWindow.WindowState == WindowState.Minimized)
                 _settingsWindow.WindowState = WindowState.Normal;
             _settingsWindow.Activate();

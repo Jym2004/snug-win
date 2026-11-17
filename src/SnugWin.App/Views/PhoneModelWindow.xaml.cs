@@ -23,6 +23,7 @@ public partial class PhoneModelWindow : Window
     public PhoneModelWindow(AppController controller)
     {
         InitializeComponent();
+        WindowPlacementHelper.ApplyModernDarkChrome(this);
         _controller = controller;
         RefreshList(string.Empty);
     }

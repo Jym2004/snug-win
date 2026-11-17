@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Security.Principal;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Threading;
 using Microsoft.Win32;
@@ -16,6 +18,7 @@ using SnugWin.Core.Touch;
 using SnugWin.Windows.Display;
 using SnugWin.Windows.Input;
 using SnugWin.Windows.Sensing;
+using SnugWin.Windows.Support;
 using SnugWin.Windows.Windows;
 
 namespace SnugWin.App.Controllers;
@@ -55,6 +58,8 @@ public sealed class AppController : ILogSink
     private int _sampling;
     private PhoneDeskState? _lastSyncedPhoneState;
     private RectD? _lastSyncedBounds;
+    private readonly AppUpdateService _updater = new();
+    private UpdateCheckResult? _latestUpdate;
     private ScreenshotOverlay? _lastSyncedOverlay;
     private bool _lastSyncedScreenshotSetting;
 
@@ -64,6 +69,11 @@ public sealed class AppController : ILogSink
     public PhoneDeskState DeskState => _desk.State;
     public bool ManualOverride => _sensor.ManualOverride;
     public bool CatalogLoaded => _catalogLoaded;
+    public string CurrentVersion => AppUpdateService.CurrentVersion;
+    public ReleasePackageKind PackageKind => AppUpdateService.CurrentPackageKind;
+    public UpdateCheckResult? LatestUpdate => _latestUpdate;
+    public bool IsAutoStartEnabled => StartupTaskService.IsEnabled();
+    public string? BundledDriverInstallerScript => LocateBundledDriverScript();
     public bool RequireInjectedInput
     {
         get => _touchHook.RequireInjectedFlag;
@@ -80,6 +90,7 @@ public sealed class AppController : ILogSink
     public event Action<string>? StateSummaryChanged;
     public event Action? UiStateChanged;
     public event Action<string>? LogAppended;
+    public event Action<UpdateCheckResult?>? UpdateStatusChanged;
 
     public AppController(Dispatcher dispatcher)
     {
@@ -142,6 +153,24 @@ public sealed class AppController : ILogSink
         _desk.Recover();
         _tickTimer.Start();
         NotifySummary();
+
+        _ = Task.Run(StartupTaskService.RefreshPathIfEnabled);
+        if (_config.AutoCheckUpdates)
+        {
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(3500).ConfigureAwait(false);
+                if (_shuttingDown) return;
+                try
+                {
+                    await CheckForUpdateAsync().ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    Log.Warn($"启动检查更新失败：{ex.Message}");
+                }
+            });
+        }
     }
 
     private async void OnTick()
@@ -499,6 +528,82 @@ public sealed class AppController : ILogSink
         if (!enabled) _screenshots.Dismiss();
         SyncPhoneWindows(forceSyncUi: true);
         UiStateChanged?.Invoke();
+    }
+
+    public void SetAutoCheckUpdatesEnabled(bool enabled)
+    {
+        _config = _config with { AutoCheckUpdates = enabled };
+        _configStore.Save(_config);
+        UiStateChanged?.Invoke();
+    }
+
+    public void SetAutoStartEnabled(bool enabled)
+    {
+        StartupTaskService.SetEnabled(enabled);
+        Log.Info(enabled ? "已开启开机静默自启动（任务计划）" : "已关闭开机静默自启动");
+        UiStateChanged?.Invoke();
+    }
+
+    public async Task<UpdateCheckResult> CheckForUpdateAsync(CancellationToken ct = default)
+    {
+        var result = await _updater.CheckForUpdateAsync(ct).ConfigureAwait(false);
+        _latestUpdate = result;
+        _ = _dispatcher.BeginInvoke(() =>
+        {
+            UpdateStatusChanged?.Invoke(result);
+            UiStateChanged?.Invoke();
+        });
+        return result;
+    }
+
+    public Task<PreparedUpdate> DownloadAndPrepareUpdateAsync(
+        UpdateCheckResult check,
+        IProgress<double>? progress = null,
+        CancellationToken ct = default) =>
+        _updater.DownloadAndPrepareAsync(check, progress, ct);
+
+    public async Task ApplyPreparedUpdateAndRestartAsync(PreparedUpdate update)
+    {
+        bool minimized = Array.Exists(
+            Environment.GetCommandLineArgs(),
+            a => a.Equals(StartupTaskDefinition.MinimizedArg, StringComparison.OrdinalIgnoreCase));
+        await ShutdownAsync().ConfigureAwait(false);
+        AppUpdateService.LaunchApplyScript(update, minimized);
+        _ = _dispatcher.BeginInvoke(() => System.Windows.Application.Current.Shutdown());
+    }
+
+    public void LaunchDriverInstaller()
+    {
+        string? script = BundledDriverInstallerScript;
+        if (string.IsNullOrEmpty(script))
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "https://github.com/MolotovCherry/virtual-display-rs/releases/tag/v0.3.1",
+                UseShellExecute = true
+            });
+            return;
+        }
+
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = "powershell.exe",
+            Arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{script}\" -Action Install",
+            UseShellExecute = true,
+            Verb = IsElevated ? string.Empty : "runas"
+        });
+    }
+
+    private static string? LocateBundledDriverScript()
+    {
+        string? dir = AppContext.BaseDirectory;
+        for (int i = 0; i < 5 && !string.IsNullOrEmpty(dir); i++)
+        {
+            string candidate = Path.Combine(dir, "driver", "Install-SnugDriver.ps1");
+            if (File.Exists(candidate)) return candidate;
+            dir = Path.GetDirectoryName(dir);
+        }
+        return null;
     }
 
     public void SetDefaultZoomSteps(int steps)

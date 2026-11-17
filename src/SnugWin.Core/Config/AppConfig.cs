@@ -17,6 +17,7 @@ public sealed record AppConfig
     public bool CopyAfterSelection { get; init; } = true;
     public bool GesturesInjectedOnly { get; init; } = true;
     public bool Screenshot { get; init; } = false;
+    public bool AutoCheckUpdates { get; init; } = true;
     public int ZoomSteps { get; init; } = 2;
     public PhoneChoice Phone { get; init; } = PhoneChoice.Standard;
     public bool Welcomed { get; init; } = false;

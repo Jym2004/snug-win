@@ -89,4 +89,31 @@ internal static class WindowPlacementHelper
         if (!noActivate && focusIfActivated)
             SetForegroundWindow(hwnd);
     }
+
+    public static void ApplyModernDarkChrome(Window window)
+    {
+        try
+        {
+            window.Icon = System.Windows.Media.Imaging.BitmapFrame.Create(
+                new Uri("pack://application:,,,/Assets/snugwin.ico"));
+        }
+        catch
+        {
+        }
+
+        void Apply()
+        {
+            var hwnd = new WindowInteropHelper(window).Handle;
+            if (hwnd == IntPtr.Zero) return;
+            int dark = 1;
+            _ = Win32.DwmSetWindowAttribute(hwnd, Win32.DWMWA_USE_IMMERSIVE_DARK_MODE, ref dark, sizeof(int));
+            int round = 2; // DWMWCP_ROUND
+            _ = Win32.DwmSetWindowAttribute(hwnd, Win32.DWMWA_WINDOW_CORNER_PREFERENCE, ref round, sizeof(int));
+        }
+
+        if (new WindowInteropHelper(window).Handle != IntPtr.Zero)
+            Apply();
+        else
+            window.SourceInitialized += (_, _) => Apply();
+    }
 }
