@@ -20,6 +20,8 @@ public partial class App : System.Windows.Application
     private Mutex? _singleInstanceMutex;
     private AppController? _controller;
     private System.Windows.Forms.NotifyIcon? _trayIcon;
+    private System.Drawing.Icon? _idleTrayIcon;
+    private System.Drawing.Icon? _connectedTrayIcon;
     private System.Windows.Forms.ToolStripMenuItem? _statusMenuItem;
     private System.Windows.Forms.ToolStripMenuItem? _manualPhoneMenuItem;
     private SettingsWindow? _settingsWindow;
@@ -45,7 +47,13 @@ public partial class App : System.Windows.Application
             Dispatcher.BeginInvoke(() =>
             {
                 if (_statusMenuItem is not null) _statusMenuItem.Text = $"状态：{summary}";
-                if (_trayIcon is not null) _trayIcon.Text = $"SnugWin - {summary}";
+                if (_trayIcon is not null)
+                {
+                    _trayIcon.Text = $"SnugWin - {summary}";
+                    var desiredIcon = _controller.IsPhoneScreenReady ? (_connectedTrayIcon ?? _idleTrayIcon) : _idleTrayIcon;
+                    if (desiredIcon is not null && !ReferenceEquals(_trayIcon.Icon, desiredIcon))
+                        _trayIcon.Icon = desiredIcon;
+                }
                 if (_manualPhoneMenuItem is not null) _manualPhoneMenuItem.Checked = _controller.ManualOverride;
             });
         };
@@ -90,14 +98,32 @@ public partial class App : System.Windows.Application
         };
         menu.Items.Add(exitItem);
 
+        _idleTrayIcon = LoadResourceIcon("Assets/snugwin-idle.ico") ?? System.Drawing.SystemIcons.Application;
+        _connectedTrayIcon = LoadResourceIcon("Assets/snugwin-connected.ico") ?? _idleTrayIcon;
+
         _trayIcon = new System.Windows.Forms.NotifyIcon
         {
-            Icon = System.Drawing.SystemIcons.Application,
+            Icon = _idleTrayIcon,
             Text = "SnugWin - UU远程手机竖屏伴侣",
             ContextMenuStrip = menu,
             Visible = true
         };
         _trayIcon.DoubleClick += (_, _) => Dispatcher.Invoke(ShowSettings);
+    }
+
+    private static System.Drawing.Icon? LoadResourceIcon(string relativeUri)
+    {
+        try
+        {
+            var streamInfo = GetResourceStream(new Uri($"pack://application:,,,/{relativeUri}"));
+            if (streamInfo?.Stream is null) return null;
+            using var s = streamInfo.Stream;
+            return new System.Drawing.Icon(s);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private void ShowSettings()
@@ -120,6 +146,8 @@ public partial class App : System.Windows.Application
     protected override void OnExit(ExitEventArgs e)
     {
         _trayIcon?.Dispose();
+        _idleTrayIcon?.Dispose();
+        _connectedTrayIcon?.Dispose();
         _singleInstanceMutex?.Dispose();
         base.OnExit(e);
     }

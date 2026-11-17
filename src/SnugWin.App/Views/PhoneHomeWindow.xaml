@@ -64,7 +64,7 @@
                                     <ColumnDefinition Width="48"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
-                                <Image Grid.Column="0" Source="{Binding Icon}" Width="44" Height="44" RenderOptions.BitmapScalingMode="LowQuality"/>
+                                <Image Grid.Column="0" Source="{Binding Icon}" Width="44" Height="44" RenderOptions.BitmapScalingMode="HighQuality"/>
                                 <StackPanel Grid.Column="1" Margin="14,0,8,0" VerticalAlignment="Center">
                                     <TextBlock Text="{Binding AppName}" FontSize="20" FontWeight="SemiBold" Foreground="White" TextTrimming="CharacterEllipsis"/>
                                     <TextBlock Text="{Binding Subtitle}" FontSize="15" Foreground="{Binding SubtitleBrush}" TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/>
@@ -350,7 +350,7 @@
                                     <Button Style="{StaticResource FlatBtn}" IsEnabled="{Binding NotQuitting}" Click="OnOpenApp" Tag="{Binding App}" Margin="4,0,4,18">
                                         <StackPanel HorizontalAlignment="Center">
                                             <Border CornerRadius="16" Background="#1C1C1E" Width="68" Height="68" Padding="10">
-                                                <Image Source="{Binding Icon}" RenderOptions.BitmapScalingMode="LowQuality"/>
+                                                <Image Source="{Binding Icon}" RenderOptions.BitmapScalingMode="HighQuality"/>
                                             </Border>
                                             <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="Medium" Foreground="White"
                                                        TextTrimming="CharacterEllipsis" HorizontalAlignment="Center" Margin="0,8,0,4" MaxWidth="104"/>
@@ -418,7 +418,7 @@
                                                                 <ColumnDefinition Width="48"/>
                                                                 <ColumnDefinition Width="*"/>
                                                             </Grid.ColumnDefinitions>
-                                                            <Image Grid.Column="0" Source="{Binding Icon}" Width="44" Height="44" RenderOptions.BitmapScalingMode="LowQuality"/>
+                                                            <Image Grid.Column="0" Source="{Binding Icon}" Width="44" Height="44" RenderOptions.BitmapScalingMode="HighQuality"/>
                                                             <StackPanel Grid.Column="1" Margin="14,0,0,0" VerticalAlignment="Center">
                                                                 <TextBlock Text="{Binding Name}" FontSize="19" FontWeight="SemiBold" Foreground="White" TextTrimming="CharacterEllipsis"/>
                                                                 <TextBlock Text="{Binding Subtitle}" FontSize="15" Foreground="{StaticResource SecondaryText}" TextTrimming="CharacterEllipsis"/>
@@ -452,7 +452,7 @@
                                                         <ColumnDefinition Width="48"/>
                                                         <ColumnDefinition Width="*"/>
                                                     </Grid.ColumnDefinitions>
-                                                    <Image Grid.Column="0" Source="{Binding Icon}" Width="44" Height="44" RenderOptions.BitmapScalingMode="LowQuality"/>
+                                                    <Image Grid.Column="0" Source="{Binding Icon}" Width="44" Height="44" RenderOptions.BitmapScalingMode="HighQuality"/>
                                                     <StackPanel Grid.Column="1" Margin="14,0,0,0" VerticalAlignment="Center">
                                                         <TextBlock Text="{Binding Name}" FontSize="19" FontWeight="SemiBold" Foreground="White" TextTrimming="CharacterEllipsis"/>
                                                         <TextBlock Text="{Binding Subtitle}" FontSize="15" Foreground="{StaticResource SecondaryText}" TextTrimming="CharacterEllipsis"/>
@@ -478,7 +478,7 @@
                                                         <ColumnDefinition Width="48"/>
                                                         <ColumnDefinition Width="*"/>
                                                     </Grid.ColumnDefinitions>
-                                                    <Image Grid.Column="0" Source="{Binding Icon}" Width="44" Height="44" RenderOptions.BitmapScalingMode="LowQuality"/>
+                                                    <Image Grid.Column="0" Source="{Binding Icon}" Width="44" Height="44" RenderOptions.BitmapScalingMode="HighQuality"/>
                                                     <StackPanel Grid.Column="1" Margin="14,0,0,0" VerticalAlignment="Center">
                                                         <TextBlock Text="{Binding Title}" FontSize="19" FontWeight="SemiBold" Foreground="White" TextTrimming="CharacterEllipsis"/>
                                                         <TextBlock Text="{Binding AppName}" FontSize="15" Foreground="{StaticResource SecondaryText}" TextTrimming="CharacterEllipsis"/>

@@ -36,6 +36,8 @@ public static unsafe partial class Win32
 
     public const int DWMWA_EXTENDED_FRAME_BOUNDS = 9;
     public const int DWMWA_CLOAKED = 14;
+    public const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+    public const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
 
     public const uint SMTO_ABORTIFHUNG = 0x0002;
 
@@ -505,6 +507,81 @@ public static unsafe partial class Win32
 
     [DllImport("dwmapi.dll")]
     public static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out int pvAttribute, int cbAttribute);
+
+    [DllImport("dwmapi.dll")]
+    public static extern int DwmSetWindowAttribute(IntPtr hwnd, int dwAttribute, ref int pvAttribute, int cbAttribute);
+
+    [DllImport("gdi32.dll")]
+    public static extern bool DeleteObject(IntPtr hObject);
+
+    [DllImport("gdi32.dll")]
+    public static extern int GetObjectW(IntPtr hgdiobj, int cbBuffer, out BITMAP lpvObject);
+
+    [DllImport("gdi32.dll")]
+    public static extern int GetDIBits(IntPtr hdc, IntPtr hbm, uint start, uint cLines, byte[] lpvBits, ref BITMAPINFO lpbmi, uint usage);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetDC(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)]
+    public static extern int SHCreateItemFromParsingName(
+        string pszPath,
+        IntPtr pbc,
+        [MarshalAs(UnmanagedType.LPStruct)] Guid riid,
+        [MarshalAs(UnmanagedType.Interface)] out IShellItemImageFactory? ppv);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct SIZE
+    {
+        public int cx;
+        public int cy;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct BITMAP
+    {
+        public int bmType;
+        public int bmWidth;
+        public int bmHeight;
+        public int bmWidthBytes;
+        public ushort bmPlanes;
+        public ushort bmBitsPixel;
+        public IntPtr bmBits;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct BITMAPINFOHEADER
+    {
+        public uint biSize;
+        public int biWidth;
+        public int biHeight;
+        public ushort biPlanes;
+        public ushort biBitCount;
+        public uint biCompression;
+        public uint biSizeImage;
+        public int biXPelsPerMeter;
+        public int biYPelsPerMeter;
+        public uint biClrUsed;
+        public uint biClrImportant;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct BITMAPINFO
+    {
+        public BITMAPINFOHEADER bmiHeader;
+    }
+
+    [ComImport]
+    [Guid("bcc18b79-ba16-442f-80c4-8a59c30c463b")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IShellItemImageFactory
+    {
+        [PreserveSig]
+        int GetImage(SIZE size, int flags, out IntPtr phbm);
+    }
 
     [DllImport("user32.dll")]
     public static extern bool EnumDisplayMonitors(IntPtr hdc, IntPtr lprcClip, MonitorEnumProc lpfnEnum, IntPtr dwData);

@@ -73,6 +73,7 @@ public sealed class AppController : ILogSink
     public bool IsDriverPipeAvailable => VirtualDisplayIpcClient.IsDriverPipeAvailable();
     public bool IsElevated => new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
     public string LogDirectory => _paths.LogDirectory;
+    public bool IsPhoneScreenReady => _desk.State.ScreenPhase == PhoneScreenPhase.Ready;
     public IReadOnlyList<RunningApp> RunningApps => _runningApps;
     public IReadOnlyList<AppInfo> InstalledApps => _installedApps;
 

@@ -10,6 +10,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>..\..\Assets\snugwin.ico</ApplicationIcon>
     <LangVersion>latest</LangVersion>
   </PropertyGroup>
   <ItemGroup>
@@ -17,6 +18,7 @@
     <ProjectReference Include="..\SnugWin.Windows\SnugWin.Windows.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <Resource Include="..\..\Assets\snugwin.ico;..\..\Assets\snugwin-connected.ico;..\..\Assets\snugwin-idle.ico;..\..\Assets\snugwin-logo.png" Link="Assets\%(Filename)%(Extension)" />
     <None Include="..\..\Assets\phone-models.json" Link="Assets\phone-models.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
