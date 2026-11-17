@@ -1,8 +1,6 @@
 <Project>
   <PropertyGroup>
     <Version>1.1.0</Version>
-    <FileVersion>1.1.0.0</FileVersion>
-    <AssemblyVersion>1.1.0.0</AssemblyVersion>
     <Product>SnugWin</Product>
     <Company>nicocat</Company>
     <Copyright>MIT License · 2026 nicocat</Copyright>

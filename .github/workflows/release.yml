@@ -96,7 +96,6 @@ jobs:
 
           Copy-Item 'driver\install-driver.cmd'                        "$stage\driver\" -Force
           Copy-Item 'driver\Install-SnugDriver.ps1'                    "$stage\driver\" -Force
-          Copy-Item 'driver\virtual-desktop-driver-installer-x64.zip'  "$stage\driver\" -Force
           Copy-Item 'driver\installer'                                 "$stage\driver\installer" -Recurse -Force
 
       - name: Zip assets
