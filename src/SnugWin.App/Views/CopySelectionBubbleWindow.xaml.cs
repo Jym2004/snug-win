@@ -1,10 +1,12 @@
 using System;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using SnugWin.App.Controllers;
 using SnugWin.Core.PhoneScreen;
+using SnugWin.Core.Touch;
 
 namespace SnugWin.App.Views;
 
@@ -18,7 +20,7 @@ public partial class CopySelectionBubbleWindow : Window
     {
         InitializeComponent();
         _controller = controller;
-        _hideTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(4.5) };
+        _hideTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5.5) };
         _hideTimer.Tick += (_, _) => HideBubble();
     }
 
@@ -35,8 +37,8 @@ public partial class CopySelectionBubbleWindow : Window
         }
         UpdateLayout();
 
-        double pxW = Math.Max(60, ActualWidth * dpiRatio);
-        double pxH = Math.Max(32, ActualHeight * dpiRatio);
+        double pxW = Math.Max(160, ActualWidth * dpiRatio);
+        double pxH = Math.Max(36, ActualHeight * dpiRatio);
         double x = Math.Clamp(selectionPoint.X - pxW / 2.0, phoneBounds.X + 8, Math.Max(phoneBounds.X + 8, phoneBounds.MaxX - pxW - 8));
         double y = Math.Clamp(selectionPoint.Y - pxH - 18 * dpiRatio, phoneBounds.Y + 8, Math.Max(phoneBounds.Y + 8, phoneBounds.MaxY - pxH - 80));
 
@@ -51,11 +53,20 @@ public partial class CopySelectionBubbleWindow : Window
         if (IsVisible) Hide();
     }
 
-    private async void OnCopyClick(object sender, MouseButtonEventArgs e)
+    private async Task ExecuteActionAsync(MouseButtonEventArgs e, SelectionBubbleAction action)
     {
         e.Handled = true;
         var pt = _targetPoint;
         HideBubble();
-        await _controller.CopySelectionAtAsync(pt);
+        await _controller.PerformSelectionActionAsync(pt, action);
     }
+
+    private void OnCopyClick(object sender, MouseButtonEventArgs e) =>
+        _ = ExecuteActionAsync(e, SelectionBubbleAction.Copy);
+
+    private void OnPasteClick(object sender, MouseButtonEventArgs e) =>
+        _ = ExecuteActionAsync(e, SelectionBubbleAction.Paste);
+
+    private void OnDeleteClick(object sender, MouseButtonEventArgs e) =>
+        _ = ExecuteActionAsync(e, SelectionBubbleAction.Delete);
 }

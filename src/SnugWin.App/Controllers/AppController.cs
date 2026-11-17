@@ -319,9 +319,12 @@ public sealed class AppController : ILogSink
         _copyBubbleWindow.ShowAtSelection(selectionEnd, bounds, scale, dpiRatio);
     }
 
-    public async Task CopySelectionAtAsync(PointD point)
+    public Task CopySelectionAtAsync(PointD point) =>
+        PerformSelectionActionAsync(point, SelectionBubbleAction.Copy);
+
+    public async Task PerformSelectionActionAsync(PointD point, SelectionBubbleAction action)
     {
-        await _windows.CopySelectionAtAsync(point);
+        await _windows.PerformSelectionActionAsync(point, action);
     }
 
     public void SyncSubPageActivation(bool focus)

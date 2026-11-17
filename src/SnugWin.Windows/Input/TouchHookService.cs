@@ -228,8 +228,11 @@ public sealed class TouchHookService : IDisposable
 
             if (kind == TouchInputKind.Press)
             {
-                dismissSelectionBubble = region.Frame.Contains(currentPoint);
-                _passthroughBrowserChrome = region.Frame.Contains(currentPoint) && IsNativeBrowserChrome(currentPoint, region.Scale);
+                bool inside = region.Frame.Contains(currentPoint);
+                bool isBrowserChrome = false;
+                bool onBubble = inside && IsSelectionBubbleAt(currentPoint, out isBrowserChrome, region.Scale);
+                dismissSelectionBubble = inside && !onBubble;
+                _passthroughBrowserChrome = inside && (onBubble || isBrowserChrome);
             }
             if (_passthroughBrowserChrome)
             {
@@ -314,15 +317,19 @@ public sealed class TouchHookService : IDisposable
         }
     }
 
-    private bool IsNativeBrowserChrome(PointD point, double scale)
+    private bool IsSelectionBubbleAt(PointD point, out bool isBrowserChrome, double scale)
     {
+        isBrowserChrome = false;
         IntPtr hit = Win32.WindowFromPoint(new Win32.POINT { X = (int)Math.Round(point.X), Y = (int)Math.Round(point.Y) });
         if (hit == IntPtr.Zero) return false;
         IntPtr root = Win32.GetAncestor(hit, Win32.GA_ROOT);
-        if (root == IntPtr.Zero || !Win32.GetWindowRect(root, out var rect)) return false;
+        if (root == IntPtr.Zero) root = hit;
+        if (!Win32.GetWindowRect(root, out var rect)) return false;
 
         Win32.GetWindowThreadProcessId(root, out int pid);
-        if (pid <= 0 || pid == Environment.ProcessId) return false;
+        if (pid <= 0) return false;
+        if (pid == Environment.ProcessId)
+            return string.Equals(Win32.GetWindowTitle(root), "SnugCopyBubble", StringComparison.Ordinal);
 
         if (!_pidExeCache.TryGetValue(pid, out string? exe))
         {
@@ -341,7 +348,8 @@ public sealed class TouchHookService : IDisposable
         if (!isBrowser) return false;
 
         double chromeHeight = 120.0 * Math.Max(1.0, scale);
-        return point.Y >= rect.Top && point.Y <= rect.Top + chromeHeight;
+        isBrowserChrome = point.Y >= rect.Top && point.Y <= rect.Top + chromeHeight;
+        return false;
     }
 
     private void HandleCloseTap(PointD at, CloseButton? button)

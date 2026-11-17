@@ -335,4 +335,25 @@ public sealed class ExpandedCoreTests
     {
         Assert.Equal(expected, ControllerClassifier.Classify(name));
     }
+
+    [Theory]
+    [InlineData(SelectionBubbleAction.Copy, "Notepad", "notepad.exe", SelectionShortcutResolver.VkC, true, false)]
+    [InlineData(SelectionBubbleAction.Copy, "CASCADIA_HOSTING_WINDOW_CLASS", "WindowsTerminal.exe", SelectionShortcutResolver.VkC, true, true)]
+    [InlineData(SelectionBubbleAction.Copy, "ConsoleWindowClass", "powershell.exe", SelectionShortcutResolver.VkC, true, true)]
+    [InlineData(SelectionBubbleAction.Paste, "Notepad", "notepad.exe", SelectionShortcutResolver.VkV, true, false)]
+    [InlineData(SelectionBubbleAction.Paste, "CASCADIA_HOSTING_WINDOW_CLASS", "WindowsTerminal.exe", SelectionShortcutResolver.VkV, true, true)]
+    [InlineData(SelectionBubbleAction.Paste, "ConsoleWindowClass", "cmd.exe", SelectionShortcutResolver.VkV, true, false)]
+    [InlineData(SelectionBubbleAction.Delete, "Notepad", "notepad.exe", SelectionShortcutResolver.VkBack, false, false)]
+    [InlineData(SelectionBubbleAction.Delete, "CASCADIA_HOSTING_WINDOW_CLASS", "WindowsTerminal.exe", SelectionShortcutResolver.VkBack, false, false)]
+    public void SelectionShortcutResolver_MapsCopyPasteDeleteAcrossAppsAndTerminals(
+        SelectionBubbleAction action,
+        string cls,
+        string exe,
+        ushort expectedVk,
+        bool expectedCtrl,
+        bool expectedShift)
+    {
+        var key = SelectionShortcutResolver.Resolve(action, cls, exe);
+        Assert.Equal(new SelectionKeystroke(expectedVk, expectedCtrl, expectedShift), key);
+    }
 }

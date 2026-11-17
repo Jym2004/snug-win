@@ -7,6 +7,7 @@ using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using SnugWin.Core.PhoneScreen;
 using SnugWin.Core.Support;
+using SnugWin.Core.Touch;
 using SnugWin.Windows.Native;
 
 namespace SnugWin.Windows.Windows;
@@ -389,21 +390,27 @@ public sealed class WindowService : IWindowControl
         }
     }
 
-    internal static void SendCtrlShortcut(ushort vk, bool withShift = false)
+    internal static void SendCtrlShortcut(ushort vk, bool withShift = false) =>
+        SendKeystroke(new SelectionKeystroke(vk, WithCtrl: true, WithShift: withShift));
+
+    internal static void SendKeystroke(SelectionKeystroke key)
     {
         var inputs = new List<Win32.INPUT>(6);
-        inputs.Add(KeyInput(Win32.VK_CONTROL, down: true));
-        if (withShift) inputs.Add(KeyInput(Win32.VK_SHIFT, down: true));
-        inputs.Add(KeyInput(vk, down: true));
-        inputs.Add(KeyInput(vk, down: false));
-        if (withShift) inputs.Add(KeyInput(Win32.VK_SHIFT, down: false));
-        inputs.Add(KeyInput(Win32.VK_CONTROL, down: false));
+        if (key.WithCtrl) inputs.Add(KeyInput(Win32.VK_CONTROL, down: true));
+        if (key.WithShift) inputs.Add(KeyInput(Win32.VK_SHIFT, down: true));
+        inputs.Add(KeyInput(key.VirtualKey, down: true));
+        inputs.Add(KeyInput(key.VirtualKey, down: false));
+        if (key.WithShift) inputs.Add(KeyInput(Win32.VK_SHIFT, down: false));
+        if (key.WithCtrl) inputs.Add(KeyInput(Win32.VK_CONTROL, down: false));
 
         var arr = inputs.ToArray();
         Win32.SendInput((uint)arr.Length, arr, Marshal.SizeOf<Win32.INPUT>());
     }
 
-    public async Task CopySelectionAtAsync(PointD point)
+    public Task CopySelectionAtAsync(PointD point) =>
+        PerformSelectionActionAsync(point, SelectionBubbleAction.Copy);
+
+    public async Task PerformSelectionActionAsync(PointD point, SelectionBubbleAction action)
     {
         IntPtr hit = Win32.WindowFromPoint(new Win32.POINT { X = (int)Math.Round(point.X), Y = (int)Math.Round(point.Y) });
         IntPtr root = hit != IntPtr.Zero ? Win32.GetAncestor(hit, Win32.GA_ROOT) : IntPtr.Zero;
@@ -414,16 +421,9 @@ public sealed class WindowService : IWindowControl
         string cls = Win32.GetWindowClass(root);
         string? exe = pid > 0 ? Path.GetFileName(Win32.GetProcessImagePath(pid)) : null;
 
-        bool isTerminal = cls is "CASCADIA_HOSTING_WINDOW_CLASS" or "ConsoleWindowClass"
-                          || string.Equals(exe, "WindowsTerminal.exe", StringComparison.OrdinalIgnoreCase)
-                          || string.Equals(exe, "OpenConsole.exe", StringComparison.OrdinalIgnoreCase)
-                          || string.Equals(exe, "powershell.exe", StringComparison.OrdinalIgnoreCase)
-                          || string.Equals(exe, "pwsh.exe", StringComparison.OrdinalIgnoreCase)
-                          || string.Equals(exe, "cmd.exe", StringComparison.OrdinalIgnoreCase);
-
         await FocusAsync(new WindowKey(pid, (ulong)root)).ConfigureAwait(false);
         await Task.Delay(35).ConfigureAwait(false);
-        SendCtrlShortcut(Win32.VK_C, withShift: isTerminal);
+        SendKeystroke(SelectionShortcutResolver.Resolve(action, cls, exe));
     }
 
     private static Win32.INPUT KeyInput(ushort vk, bool down) => new()

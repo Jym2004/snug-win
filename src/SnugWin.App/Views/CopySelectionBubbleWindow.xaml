@@ -9,16 +9,42 @@
         ResizeMode="NoResize"
         SizeToContent="WidthAndHeight"
         Topmost="True">
+    <Window.Resources>
+        <Style x:Key="BubbleSegmentStyle" TargetType="Border">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Padding" Value="15,9"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#28FFFFFF"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="BubbleDeleteSegmentStyle" TargetType="Border" BasedOn="{StaticResource BubbleSegmentStyle}">
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#35EF4444"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
     <Border x:Name="BubbleBorder"
-            Background="#E61C1C1E"
-            BorderBrush="#40FFFFFF"
+            Background="#EB1C1C1E"
+            BorderBrush="#45FFFFFF"
             BorderThickness="1"
-            CornerRadius="18"
-            Padding="16,9"
-            Cursor="Hand"
-            MouseLeftButtonUp="OnCopyClick">
+            CornerRadius="18">
         <StackPanel Orientation="Horizontal">
-            <TextBlock Text="复制" FontSize="15" FontWeight="SemiBold" Foreground="White" VerticalAlignment="Center"/>
+            <Border Style="{StaticResource BubbleSegmentStyle}" CornerRadius="17,0,0,17" MouseLeftButtonUp="OnCopyClick">
+                <TextBlock Text="复制" FontSize="14.5" FontWeight="SemiBold" Foreground="White" VerticalAlignment="Center"/>
+            </Border>
+            <Border Width="1" Background="#30FFFFFF" Margin="0,7"/>
+            <Border Style="{StaticResource BubbleSegmentStyle}" CornerRadius="0" MouseLeftButtonUp="OnPasteClick">
+                <TextBlock Text="粘贴" FontSize="14.5" FontWeight="SemiBold" Foreground="White" VerticalAlignment="Center"/>
+            </Border>
+            <Border Width="1" Background="#30FFFFFF" Margin="0,7"/>
+            <Border Style="{StaticResource BubbleDeleteSegmentStyle}" CornerRadius="0,17,17,0" MouseLeftButtonUp="OnDeleteClick">
+                <TextBlock Text="删除" FontSize="14.5" FontWeight="SemiBold" Foreground="#FF7B72" VerticalAlignment="Center"/>
+            </Border>
         </StackPanel>
     </Border>
 </Window>

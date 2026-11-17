@@ -44,7 +44,7 @@
                               Checked="OnGestureScrollChanged" Unchecked="OnGestureScrollChanged"/>
                     <CheckBox x:Name="GestureRightClickCheck" Content="长按松开触发右键菜单（在 PowerShell 中可取消勾选以防误粘贴）" Foreground="#CBD5E1" FontSize="12.5" Margin="0,0,0,5"
                               Checked="OnGestureRightClickChanged" Unchecked="OnGestureRightClickChanged"/>
-                    <CheckBox x:Name="CopyAfterSelectionCheck" Content="划选文本松手后显示悬浮「复制」按钮（终端自动安全发送 Ctrl+Shift+C）" Foreground="#CBD5E1" FontSize="12.5" Margin="0,0,0,5"
+                    <CheckBox x:Name="CopyAfterSelectionCheck" Content="划选文本松手后显示悬浮操作条（复制 / 粘贴 / 删除）" Foreground="#CBD5E1" FontSize="12.5" Margin="0,0,0,5"
                               Checked="OnCopyAfterSelectionChanged" Unchecked="OnCopyAfterSelectionChanged"/>
                     <CheckBox x:Name="InjectedOnlyCheck" Content="仅接管 UU 注入触控事件 (保留本机物理鼠标跨屏直操作)" Foreground="#CBD5E1" FontSize="12.5"
                               Checked="OnInjectedOnlyChanged" Unchecked="OnInjectedOnlyChanged"/>
