@@ -133,6 +133,13 @@ public static class PinyinSearch
                 continue;
             }
 
+            if (ExtraPinyin.TryGetValue(ch, out string? extraPy))
+            {
+                full.Append(extraPy);
+                initials.Append(extraPy[0]);
+                continue;
+            }
+
             if (Gb2312Encoding is not null)
             {
                 one[0] = ch;
@@ -156,16 +163,91 @@ public static class PinyinSearch
         return (full.ToString(), initials.ToString());
     }
 
+    private static readonly Dictionary<char, string> ExtraPinyin = new()
+    {
+        ['哔'] = "bi",
+        ['哩'] = "li",
+        ['咪'] = "mi",
+        ['咕'] = "gu",
+        ['钉'] = "ding",
+        ['抖'] = "dou",
+        ['酷'] = "ku",
+        ['讯'] = "xun",
+        ['淘'] = "tao",
+        ['宝'] = "bao",
+        ['闲'] = "xian",
+        ['鱼'] = "yu",
+        ['拼'] = "pin",
+        ['多'] = "duo",
+        ['知'] = "zhi",
+        ['乎'] = "hu",
+        ['剪'] = "jian",
+        ['映'] = "ying",
+        ['豆'] = "dou",
+        ['瓣'] = "ban"
+    };
+
+    private static readonly Dictionary<char, string[]> Polyphones = new()
+    {
+        ['乐'] = ["yue", "le"],
+        ['行'] = ["hang", "xing"],
+        ['重'] = ["chong", "zhong"],
+        ['调'] = ["tiao", "diao"],
+        ['藏'] = ["cang", "zang"],
+        ['长'] = ["chang", "zhang"],
+        ['传'] = ["chuan", "zhuan"]
+    };
+
+    private static (string Full, string Initials)[] ExpandVariants(string text)
+    {
+        var basePair = ToPinyin(text);
+        if (string.IsNullOrEmpty(text)) return [basePair];
+
+        bool hasPoly = false;
+        foreach (char c in text)
+        {
+            if (Polyphones.ContainsKey(c))
+            {
+                hasPoly = true;
+                break;
+            }
+        }
+        if (!hasPoly) return [basePair];
+
+        // Alternate reading variant replacing first/all polyphones with secondary reading
+        var altFull = new StringBuilder(text.Length * 3);
+        var altInit = new StringBuilder(text.Length);
+        foreach (char c in text)
+        {
+            if (Polyphones.TryGetValue(c, out var readings))
+            {
+                altFull.Append(readings[0]);
+                altInit.Append(readings[0][0]);
+            }
+            else
+            {
+                var (f, i) = ToPinyin(c.ToString());
+                altFull.Append(f);
+                altInit.Append(i);
+            }
+        }
+        return [basePair, (altFull.ToString(), altInit.ToString())];
+    }
+
     public static bool Matches(string text, string query)
     {
         if (string.IsNullOrWhiteSpace(query)) return true;
         var q = query.Trim().ToLowerInvariant();
         if (text.Contains(q, StringComparison.OrdinalIgnoreCase)) return true;
 
-        var (full, initials) = ToPinyin(text);
         var qCompact = q.Replace(" ", string.Empty);
-        return full.Contains(qCompact, StringComparison.Ordinal)
-            || initials.Contains(qCompact, StringComparison.Ordinal);
+        foreach (var (full, initials) in ExpandVariants(text))
+        {
+            if (full.Contains(qCompact, StringComparison.Ordinal)
+                || initials.Contains(qCompact, StringComparison.Ordinal))
+                return true;
+        }
+        return false;
     }
 
     public static string SortKey(string text)
@@ -184,16 +266,17 @@ public static class PinyinSearch
         var q = query.Trim().ToLowerInvariant().Replace(" ", string.Empty);
         if (q.Length == 0) return 0;
         var normText = text.Trim().ToLowerInvariant().Replace(" ", string.Empty);
-        var (full, initials) = ToPinyin(text);
-        if (normText.StartsWith(q, StringComparison.Ordinal)
-            || full.StartsWith(q, StringComparison.Ordinal)
-            || initials.StartsWith(q, StringComparison.Ordinal))
-            return 2;
-        if (normText.Contains(q, StringComparison.Ordinal)
-            || full.Contains(q, StringComparison.Ordinal)
-            || initials.Contains(q, StringComparison.Ordinal))
-            return 1;
-        return 0;
+        if (normText.StartsWith(q, StringComparison.Ordinal)) return 2;
+
+        int best = normText.Contains(q, StringComparison.Ordinal) ? 1 : 0;
+        foreach (var (full, initials) in ExpandVariants(text))
+        {
+            if (full.StartsWith(q, StringComparison.Ordinal) || initials.StartsWith(q, StringComparison.Ordinal))
+                return 2;
+            if (best == 0 && (full.Contains(q, StringComparison.Ordinal) || initials.Contains(q, StringComparison.Ordinal)))
+                best = 1;
+        }
+        return best;
     }
 
     private static string Lookup(int code)
