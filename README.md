@@ -4,6 +4,18 @@
 
 承接并 1:1 遵循 [zephyr4123/snug](https://github.com/zephyr4123/snug)（MIT License，`v2.5.0`）的产品体验、状态机与交互逻辑，为 Windows 10/11 + 网易 UU远程（GameViewer）实现。
 
+## 下载
+
+直接取第一个正式版：[**SnugWin v1.0.0**](https://github.com/nicocart/snug-win/releases/tag/v1.0.0)
+
+| 资产 | 说明 |
+| --- | --- |
+| `SnugWin-v1.0.0-win-x64-selfcontained.zip` | 推荐，内置 .NET 8 运行时，解压即用 |
+| `SnugWin-v1.0.0-win-x64-frameworkdependent.zip` | 体积小，需先装 [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0/runtime/desktop) |
+| `virtual-display-driver-0.3.1-x64.zip` | 虚拟显示器驱动 + 一键安装脚本，首次使用必须装 |
+
+安装：① 管理员运行驱动包内 `install-driver.cmd` → ② 双击 `SnugWin.App.exe`（UAC 允许）→ ③ 手机用 UU远程 连入本机。
+
 ## 主要功能
 
 * **自动手机竖屏**：手机通过 UU远程 连入时自动创建 1 块竖屏虚拟显示器（按所选机型或自定义比例），断开后自动归位窗口并撤屏。
