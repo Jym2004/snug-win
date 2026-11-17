@@ -13,10 +13,11 @@
 
 | 资产 | 说明 |
 | --- | --- |
-| `SnugWin-v1.1.1-win-x64-selfcontained.zip` | 推荐，内置 .NET 10 运行时，解压即用 |
+| `SnugWin-vX.Y.Z-win-x64-setup.exe` | **一键安装包**（推荐）：内置 .NET 10 运行时、驱动校验安装、桌面快捷方式与可选开机自启 |
+| `SnugWin-v1.1.1-win-x64-selfcontained.zip` | 绿色便携版，内置 .NET 10 运行时，解压即用 |
 | `SnugWin-v1.1.1-win-x64-frameworkdependent.zip` | 体积小，需 [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) |
-| `virtual-display-driver-0.3.1-x64.zip` | 虚拟显示器驱动 + 校验安装脚本，首次使用必须装 |
-| `checksums.txt` | 三个包的 SHA-256 |
+| `virtual-display-driver-0.3.1-x64.zip` | 虚拟显示器驱动 + 校验安装脚本（绿色版首次使用必须装） |
+| `checksums.txt` | 所有发布资产的 SHA-256 |
 
 安装：① 管理员运行驱动包内 `install-driver.cmd`（调用 `Install-SnugDriver.ps1` 做 SHA256 与证书指纹校验及归属标记）→ ② 双击 `SnugWin.App.exe`（UAC 允许）→ ③ 手机用 UU远程 连入本机。
 
@@ -28,16 +29,21 @@
 * **手机端 App 资源库**：1:1 还原 iPhone 风格资源库（运行中分「当前 App / 其他 App」、全部 4 列图标网格、含常用 App 扩展字表的拼音与首字母实时搜索、支持 `shell:AppsFolder` UWP 应用启动、屏内手机型号切换、新建窗口/关窗/退出两步确认）。
 * **底部小横条**：支持点击或单指上滑回到 App 资源库；可选开启左侧相机键，支持手机屏窗口一键截图、剪贴板复制、缩略图预览与 8 把手裁剪。
 * **全局手势翻译与细分开关**：独立高优先级 `WH_MOUSE_LL` 钩子 + 异步重放队列，支持单指滚动与 60fps 惯性、长按 0.5 秒选字（精确回放按压原点，松手弹出悬浮操作条 **复制 / 粘贴 / 删除**，终端自动走 `Ctrl+Shift+C` / `Ctrl+Shift+V`，删除为 `Backspace`）、长按松开右键、浏览器标签页直通点击、点击置顶窗口关闭按钮时先归位再关闭；可在设置窗中独立开关「仅注入手势生效 / 单指滚动 / 长按右键 / 划选后显示悬浮操作条」。
+* **现代深色 UI、开机静默自启与应用内热更新**：原创多分辨率图标与双态托盘徽标、Win11 深色沉浸式标题栏与 ToggleSwitch、128px 高清桌面/UWP 应用图标提取；支持 Task Scheduler 最高权限开机静默自启，以及内置 GitHub Release 检查与 SHA-256 校验自动更新。
 * **断电/崩溃保护**：窗口原位置与缩放级别持久化在 `%LocalAppData%\SnugWin\phone-screen.json`，重启后自动恢复。
 
 ## 架构分层
 
 ```text
 snug-win/
-├── Assets/phone-models.json           # 手机机型屏幕比例库
+├── Assets/
+│   ├── phone-models.json              # 手机机型屏幕比例库
+│   └── snugwin*.ico / logo.png        # 品牌多分辨率图标与托盘双态徽标
 ├── driver/
 │   ├── install-driver.cmd             # 驱动安装/卸载/状态入口
 │   └── Install-SnugDriver.ps1         # SHA256 + 证书指纹校验与设备归属管理
+├── installer/
+│   └── SnugWin.iss                    # Inno Setup 6 一键安装包构建脚本
 ├── src/
 │   ├── SnugWin.Core/                  # 纯逻辑层（.NET 10，无 Win32/WPF 依赖）
 │   │   ├── Config/AppConfig.cs        # 容错配置读写（含细分手势与复制开关）
@@ -74,7 +80,7 @@ dotnet publish src\SnugWin.App\SnugWin.App.csproj -c Release -r win-x64 --self-c
 发版由 GitHub Actions 完成，不用手工打包：
 
 * `ci.yml`：`main` 的每次推送与 PR 都跑一次 build（`-warnaserror`）+ 全部测试，红灯即视为不可合并
-* `release.yml`：推送 `v*` tag 自动走 build → test → publish（自包含 + 框架依赖）→ 拉取并校验 virtual-display-rs 0.3.1 → 打三个 zip → 生成校验和 → 创建 Release 并上传资产
+* `release.yml`：推送 `v*` tag 自动走 build → test → publish（自包含 + 框架依赖）→ 拉取并校验 virtual-display-rs 0.3.1 → 打三个 zip + Inno Setup 安装包 → 生成校验和 → 创建 Release 并上传资产
   * 也可在 Actions 页手动 `Run workflow`，填 tag 与 `draft` 选项
   * 驱动包不入库（`.gitignore` 排除 msi/证书），CI 直接从上游 release 下载并按 SHA256 校验后打进驱动包
 

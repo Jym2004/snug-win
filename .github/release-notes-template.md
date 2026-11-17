@@ -6,9 +6,10 @@ Windows 10/11 上为 网易 UU远程 提供手机原生级操作体验的伴侣�
 
 | 资产 | 说明 |
 | --- | --- |
-| `SnugWin-v{{VERSION}}-win-x64-selfcontained.zip` | **推荐**，内置 .NET 10 运行时，解压即用 |
+| `SnugWin-v{{VERSION}}-win-x64-setup.exe` | **一键安装包**（推荐新手）：内置 .NET 10 运行时、驱动校验安装脚本、桌面快捷方式与可选开机自启 |
+| `SnugWin-v{{VERSION}}-win-x64-selfcontained.zip` | 绿色便携自包含版，内置 .NET 10 运行时，解压即用并支持应用内热更新 |
 | `SnugWin-v{{VERSION}}-win-x64-frameworkdependent.zip` | 体积小，需先装 [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0/runtime/desktop) |
-| `virtual-display-driver-0.3.1-x64.zip` | 虚拟显示器驱动 + 校验安装脚本，**首次使用必须装** |
+| `virtual-display-driver-0.3.1-x64.zip` | 独立虚拟显示器驱动包（绿色版首次使用需要单独运行内部 `install-driver.cmd`） |
 
 ### 安装三步
 

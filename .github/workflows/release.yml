@@ -114,6 +114,34 @@ jobs:
             Write-Host ("{0}  {1:N2} MB" -f (Split-Path $out -Leaf), ((Get-Item $out).Length / 1MB))
           }
 
+      - name: Build Windows installer (Inno Setup)
+        shell: pwsh
+        run: |
+          $version = '${{ steps.meta.outputs.version }}'
+          $iscc = @(
+            (Get-Command iscc -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source),
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
+            "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
+          ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+
+          if (-not $iscc) {
+            choco install innosetup -y --no-progress
+            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          }
+          if (-not (Test-Path $iscc)) { throw "未找到 Inno Setup 编译器 ISCC.exe" }
+
+          & $iscc `
+            "/DAppVersion=$version" `
+            "/DRootDir=$PWD" `
+            "/DAppDir=$PWD\dist\stage\self" `
+            "/DDriverDir=$PWD\dist\stage\driver" `
+            "/DOutputDir=$PWD\dist" `
+            "installer\SnugWin.iss"
+          if ($LASTEXITCODE -ne 0) { throw "ISCC 编译安装包失败 ($LASTEXITCODE)" }
+          $exe = Get-Item "dist\SnugWin-v$version-win-x64-setup.exe"
+          Write-Host ("{0}  {1:N2} MB" -f $exe.Name, ($exe.Length / 1MB))
+
       - name: Generate checksums and release notes
         shell: pwsh
         run: |
@@ -133,8 +161,8 @@ jobs:
           }
           Write-Host "commits: $($commits.Count)"
 
-          $zips = Get-ChildItem 'dist' -Filter '*.zip'
-          $lines = @(foreach ($z in $zips) { '{0}  {1}' -f (Get-FileHash $z.FullName -Algorithm SHA256).Hash, $z.Name })
+          $pkgs = Get-ChildItem 'dist' -File | Where-Object { $_.Extension -in '.zip', '.exe' } | Sort-Object Name
+          $lines = @(foreach ($z in $pkgs) { '{0}  {1}' -f (Get-FileHash $z.FullName -Algorithm SHA256).Hash, $z.Name })
           $lines | Set-Content 'dist\checksums.txt' -Encoding UTF8
           $lines | ForEach-Object { Write-Host $_ }
 
@@ -160,6 +188,7 @@ jobs:
           prerelease: false
           fail_on_unmatched_files: true
           files: |
+            dist/SnugWin-v${{ steps.meta.outputs.version }}-win-x64-setup.exe
             dist/SnugWin-v${{ steps.meta.outputs.version }}-win-x64-selfcontained.zip
             dist/SnugWin-v${{ steps.meta.outputs.version }}-win-x64-frameworkdependent.zip
             dist/virtual-display-driver-0.3.1-x64.zip
