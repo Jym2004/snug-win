@@ -45,7 +45,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
-          fetch-depth: 1
+          fetch-depth: 0
 
       - name: Set up .NET 10 SDK
         uses: actions/setup-dotnet@v4
@@ -119,6 +119,21 @@ jobs:
         shell: pwsh
         run: |
           $version = '${{ steps.meta.outputs.version }}'
+          $tag = '${{ steps.meta.outputs.tag }}'
+
+          # 自上一个 tag 以来的提交，作为「本版变化」的原始素材
+          $prev = git describe --tags --abbrev=0 --exclude "$tag" "$tag^" 2>$null
+          if ($LASTEXITCODE -eq 0 -and $prev) {
+            $range = "$prev..$tag"
+            $commits = @(git log --pretty=format:'- %s (`%h`)' $range)
+            $commitsHeader = "自 ``$prev`` 以来的提交："
+          } else {
+            $prev = 'main'
+            $commits = @(git log --pretty=format:'- %s (`%h`)' -20 $tag)
+            $commitsHeader = "最近 20 条提交："
+          }
+          Write-Host "commits: $($commits.Count)"
+
           $zips = Get-ChildItem 'dist' -Filter '*.zip'
           $lines = @(foreach ($z in $zips) { '{0}  {1}' -f (Get-FileHash $z.FullName -Algorithm SHA256).Hash, $z.Name })
           $lines | Set-Content 'dist\checksums.txt' -Encoding UTF8
@@ -126,8 +141,13 @@ jobs:
 
           $fence = '```'
           $tail = @('', '### 校验和', '', ($fence + 'text')) + $lines + @($fence, '')
-          $template = Get-Content '.github\release-notes-template.md' -Raw
-          $body = $template.Replace('{{VERSION}}', $version) + ($tail -join "`r`n")
+          $changeLog = (@($commitsHeader, '') + $commits) -join "`r`n"
+
+          $template = Get-Content '.github\release-notes-template.md' -Raw -Encoding UTF8
+          $body = $template.Replace('{{VERSION}}', $version)
+          $body = $body.Replace('{{PREVIOUS}}', $prev)
+          $body = $body.Replace('{{COMMITS}}', $changeLog)
+          $body = $body + ($tail -join "`r`n")
           Set-Content 'dist\release-notes.md' -Value $body -Encoding UTF8
           Write-Host "release notes: $((Get-Item 'dist\release-notes.md').Length) bytes"
 

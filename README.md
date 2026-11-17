@@ -9,17 +9,18 @@
 
 ## 下载
 
-最新发布：[**SnugWin v1.1.0**](https://github.com/nicocart/snug-win/releases/tag/v1.1.0) ｜ 历史版本见 [Releases](https://github.com/nicocart/snug-win/releases)
+最新发布：[**SnugWin v1.1.1**](https://github.com/nicocart/snug-win/releases/tag/v1.1.1) ｜ 历史版本见 [Releases](https://github.com/nicocart/snug-win/releases)
 
 | 资产 | 说明 |
 | --- | --- |
-| `SnugWin-v1.1.0-win-x64-selfcontained.zip` | 推荐，内置 .NET 10 运行时，解压即用 |
-| `SnugWin-v1.1.0-win-x64-frameworkdependent.zip` | 体积小，需 [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) |
+| `SnugWin-v1.1.1-win-x64-selfcontained.zip` | 推荐，内置 .NET 10 运行时，解压即用 |
+| `SnugWin-v1.1.1-win-x64-frameworkdependent.zip` | 体积小，需 [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) |
 | `virtual-display-driver-0.3.1-x64.zip` | 虚拟显示器驱动 + 校验安装脚本，首次使用必须装 |
+| `checksums.txt` | 三个包的 SHA-256 |
 
 安装：① 管理员运行驱动包内 `install-driver.cmd`（调用 `Install-SnugDriver.ps1` 做 SHA256 与证书指纹校验及归属标记）→ ② 双击 `SnugWin.App.exe`（UAC 允许）→ ③ 手机用 UU远程 连入本机。
 
-> `v1.1.0` 主要变化：升级 **.NET 10 LTS**、选区悬浮条新增**粘贴 / 删除**、驱动安装器加入 **SHA256 + 证书指纹校验与设备归属标记**、`.NET 10` 下重写 UU 日志路径探测、App 资源库支持 **UWP（`shell:AppsFolder`）** 应用、多音字搜索与 129 项单元测试。完整变更见 [Release Notes](https://github.com/nicocart/snug-win/releases/tag/v1.1.0)。
+> `v1.1.1` 功能与 `v1.1.0` 相同，变化在工程侧：由 GitHub Actions 自动构建与发布（build `-warnaserror` + 129 项测试 + 资产上传 + 校验和），驱动包在 CI 中从上游下载并按 SHA256 校验后打包。`v1.1.0` 的内容（.NET 10 LTS、选区悬浮条粘贴/删除、驱动安装加固、UWP 应用、多音字搜索）见 [该版说明](https://github.com/nicocart/snug-win/releases/tag/v1.1.0)。
 
 ## 主要功能
 

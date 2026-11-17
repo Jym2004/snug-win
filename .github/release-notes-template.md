@@ -23,9 +23,9 @@ Windows 10/11 上为 网易 UU远程 提供手机原生级操作体验的伴侣�
 
 ### 本版变化
 
-<!-- CI 自动发布：请在下面补一段本版要点，或直接由 tag 前的提交说明概括 -->
-- 构建与 129 项单元测试全部通过（CI 门禁）
-- 详细变更见本仓库提交历史与 [README](https://github.com/nicocart/snug-win#readme)
+{{COMMITS}}
+
+完整差异：https://github.com/nicocart/snug-win/compare/{{PREVIOUS}}...v{{VERSION}}
 
 ### 前置条件
 
