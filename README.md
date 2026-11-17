@@ -6,22 +6,24 @@
 
 ## 下载
 
-最新发布：[**SnugWin Releases**](https://github.com/nicocart/snug-win/releases)（`v1.0.0` 已发布，`main` 分支已升级至 **.NET 10 LTS**）
+最新发布：[**SnugWin v1.1.0**](https://github.com/nicocart/snug-win/releases/tag/v1.1.0) ｜ 历史版本见 [Releases](https://github.com/nicocart/snug-win/releases)
 
 | 资产 | 说明 |
 | --- | --- |
-| `SnugWin-v1.0.0-win-x64-selfcontained.zip` | 推荐，内置运行时，解压即用 |
-| `SnugWin-v1.0.0-win-x64-frameworkdependent.zip` | 体积小，需对应版本 Desktop Runtime |
+| `SnugWin-v1.1.0-win-x64-selfcontained.zip` | 推荐，内置 .NET 10 运行时，解压即用 |
+| `SnugWin-v1.1.0-win-x64-frameworkdependent.zip` | 体积小，需 [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) |
 | `virtual-display-driver-0.3.1-x64.zip` | 虚拟显示器驱动 + 校验安装脚本，首次使用必须装 |
 
 安装：① 管理员运行驱动包内 `install-driver.cmd`（调用 `Install-SnugDriver.ps1` 做 SHA256 与证书指纹校验及归属标记）→ ② 双击 `SnugWin.App.exe`（UAC 允许）→ ③ 手机用 UU远程 连入本机。
+
+> `v1.1.0` 主要变化：升级 **.NET 10 LTS**、选区悬浮条新增**粘贴 / 删除**、驱动安装器加入 **SHA256 + 证书指纹校验与设备归属标记**、`.NET 10` 下重写 UU 日志路径探测、App 资源库支持 **UWP（`shell:AppsFolder`）** 应用、多音字搜索与 129 项单元测试。完整变更见 [Release Notes](https://github.com/nicocart/snug-win/releases/tag/v1.1.0)。
 
 ## 主要功能
 
 * **自动手机竖屏**：手机通过 UU远程 连入时自动创建 1 块竖屏虚拟显示器（按所选机型或自定义比例），动态解析 `GameViewerServer` 日志路径与四路连接传感，断开后自动归位窗口并撤屏。
 * **手机端 App 资源库**：1:1 还原 iPhone 风格资源库（运行中分「当前 App / 其他 App」、全部 4 列图标网格、含常用 App 扩展字表的拼音与首字母实时搜索、支持 `shell:AppsFolder` UWP 应用启动、屏内手机型号切换、新建窗口/关窗/退出两步确认）。
 * **底部小横条**：支持点击或单指上滑回到 App 资源库；可选开启左侧相机键，支持手机屏窗口一键截图、剪贴板复制、缩略图预览与 8 把手裁剪。
-* **全局手势翻译与细分开关**：独立高优先级 `WH_MOUSE_LL` 钩子 + 异步重放队列，支持单指滚动与 60fps 惯性、长按 0.5 秒选字（精确回放按压原点并支持选字后「复制」悬浮气泡，终端自动发送 `Ctrl+Shift+C`）、长按松开右键、浏览器标签页直通点击、点击置顶窗口关闭按钮时先归位再关闭；可在设置窗中独立开关「仅注入手势生效 / 单指滚动 / 长按右键 / 选字后显示复制」。
+* **全局手势翻译与细分开关**：独立高优先级 `WH_MOUSE_LL` 钩子 + 异步重放队列，支持单指滚动与 60fps 惯性、长按 0.5 秒选字（精确回放按压原点，松手弹出悬浮操作条 **复制 / 粘贴 / 删除**，终端自动走 `Ctrl+Shift+C` / `Ctrl+Shift+V`，删除为 `Backspace`）、长按松开右键、浏览器标签页直通点击、点击置顶窗口关闭按钮时先归位再关闭；可在设置窗中独立开关「仅注入手势生效 / 单指滚动 / 长按右键 / 划选后显示悬浮操作条」。
 * **断电/崩溃保护**：窗口原位置与缩放级别持久化在 `%LocalAppData%\SnugWin\phone-screen.json`，重启后自动恢复。
 
 ## 架构分层
@@ -46,7 +48,7 @@ snug-win/
 │   │   └── Sensing/                   # GameViewer (UU远程) 覆盖窗 + UIA + peer TCP / 动态日志探测
 │   └── SnugWin.App/                   # WPF PerMonitorV2 托盘常驻、手机屏资源库、小横条、复制气泡、裁剪页、设置窗
 ├── tests/
-│   └── SnugWin.Core.Tests/            # xUnit 单元测试（121 项覆盖核心状态机与边界）
+│   └── SnugWin.Core.Tests/            # xUnit 单元测试（129 项覆盖核心状态机与边界）
 └── THIRD_PARTY_NOTICES.md             # 第三方开源组件与许可清单
 ```
 
