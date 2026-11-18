@@ -1,5 +1,7 @@
 <div align="center">
 
+**简体中文** · [English](README.en.md)
+
 <img src="Assets/snugwin-logo.png" width="128" alt="SnugWin 图标">
 
 # SnugWin
@@ -44,7 +46,8 @@ UU远程 默认将整块电脑桌面等比压缩进手机屏幕，文字与按�
 
 ### 竖屏原生显示
 
-* **专属竖屏**：四路探测（GameViewer 覆盖窗、UIA 控制器列表、TCP peer 连接、动态解析 `GameViewerServer` 推流日志）精准识别 UU 连入；自动通过 `virtual-display-rs` 命名管道创建竖屏虚拟显示器，按所选机型比例与高 DPI（CCD）呈现。
+* **专属竖屏**：四路探测（GameViewer 覆盖窗、UIA 控制器列表、动态解析 `GameViewerServer` 推流日志连续增长，并将 TCP 对端降为辅助诊断避免残留连接误报）精准识别 UU 连入与断开；自动通过 `virtual-display-rs` 命名管道按 SnugWin 归属 ID 创建并只清理自身虚拟屏，按所选机型比例与高 DPI（CCD）呈现。
+* **同会话重进手机屏**：在手机端退出手机屏后，本次 UU 会话期间会在主屏右下角保留轻量化 **「进入手机屏」** 悬浮胶囊并在托盘提供重进入口，随时一键恢复竖屏。
 * **窗口铺满**：选中的窗口通过 DWM 扩展边框补偿精确贴满手机屏。
 * **字号放大**：终端、VS Code、Cursor 等编辑器自动放大字号，按 App 分别记忆，并在恢复原位时自动缩回。
 
@@ -168,7 +171,7 @@ UU远程 手机端沿用触控板鼠标逻辑；SnugWin 通过独立高优先级
 * **三层架构**：`SnugWin.Core`（纯逻辑与状态机，无 Win32/WPF 依赖）→ `SnugWin.Windows`（显示、搬窗、输入钩子、UU 传感、自启与更新）→ `SnugWin.App`（现代深色 WPF 界面与托盘宿主）
 
 ```powershell
-# 构建（零警告门禁）并运行全部 139 项单元测试
+# 构建（零警告门禁）并运行全部 175 项单元测试
 dotnet build SnugWin.sln -c Release -warnaserror
 dotnet test SnugWin.sln -c Release --no-build
 
