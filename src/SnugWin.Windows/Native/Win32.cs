@@ -38,6 +38,10 @@ public static unsafe partial class Win32
     public const int DWMWA_CLOAKED = 14;
     public const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
     public const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
+    public const int DWMWA_SYSTEMBACKDROP_TYPE = 38;
+    public const int DWMSBT_MAINWINDOW = 2;      // Mica
+    public const int DWMSBT_TRANSIENTWINDOW = 3; // Acrylic
+    public const int DWMSBT_TABBEDWINDOW = 4;    // Mica Alt
 
     public const uint SMTO_ABORTIFHUNG = 0x0002;
 
@@ -507,6 +511,18 @@ public static unsafe partial class Win32
 
     [DllImport("dwmapi.dll")]
     public static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out int pvAttribute, int cbAttribute);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct MARGINS
+    {
+        public int LeftWidth;
+        public int RightWidth;
+        public int TopHeight;
+        public int BottomHeight;
+    }
+
+    [DllImport("dwmapi.dll")]
+    public static extern int DwmExtendFrameIntoClientArea(IntPtr hwnd, ref MARGINS pMarInset);
 
     [DllImport("dwmapi.dll")]
     public static extern int DwmSetWindowAttribute(IntPtr hwnd, int dwAttribute, ref int pvAttribute, int cbAttribute);

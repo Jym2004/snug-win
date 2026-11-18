@@ -92,6 +92,11 @@ internal static class WindowPlacementHelper
 
     public static void ApplyModernDarkChrome(Window window)
     {
+        ApplyMicaBackdrop(window, backdropType: Win32.DWMSBT_TABBEDWINDOW);
+    }
+
+    public static void ApplyMicaBackdrop(Window window, int backdropType = Win32.DWMSBT_TABBEDWINDOW)
+    {
         try
         {
             window.Icon = System.Windows.Media.Imaging.BitmapFrame.Create(
@@ -105,20 +110,37 @@ internal static class WindowPlacementHelper
         {
             var hwnd = new WindowInteropHelper(window).Handle;
             if (hwnd == IntPtr.Zero) return;
+
             int dark = 1;
             _ = Win32.DwmSetWindowAttribute(hwnd, Win32.DWMWA_USE_IMMERSIVE_DARK_MODE, ref dark, sizeof(int));
             int round = 2; // DWMWCP_ROUND
             _ = Win32.DwmSetWindowAttribute(hwnd, Win32.DWMWA_WINDOW_CORNER_PREFERENCE, ref round, sizeof(int));
-            // Match Windows 11 native title bar & subtle border to SnugWin's #10141C dark slate canvas (COLORREF 0x00BBGGRR)
-            const int DWMWA_BORDER_COLOR = 34;
-            const int DWMWA_CAPTION_COLOR = 35;
-            const int DWMWA_TEXT_COLOR = 36;
-            int captionColor = 0x001C1410; // #10141C
-            int borderColor = 0x003A2B23;  // #232B3A
-            int textColor = 0x00F9F5F1;    // #F1F5F9
-            _ = Win32.DwmSetWindowAttribute(hwnd, DWMWA_CAPTION_COLOR, ref captionColor, sizeof(int));
-            _ = Win32.DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, ref borderColor, sizeof(int));
-            _ = Win32.DwmSetWindowAttribute(hwnd, DWMWA_TEXT_COLOR, ref textColor, sizeof(int));
+
+            bool isWin11MicaSupported = Environment.OSVersion.Version.Build >= 22621;
+            if (isWin11MicaSupported)
+            {
+                if (HwndSource.FromHwnd(hwnd)?.CompositionTarget is { } target)
+                    target.BackgroundColor = System.Windows.Media.Colors.Transparent;
+
+                var margins = new Win32.MARGINS
+                {
+                    LeftWidth = -1,
+                    RightWidth = -1,
+                    TopHeight = -1,
+                    BottomHeight = -1
+                };
+                int hrExtend = Win32.DwmExtendFrameIntoClientArea(hwnd, ref margins);
+                int hrBackdrop = Win32.DwmSetWindowAttribute(hwnd, Win32.DWMWA_SYSTEMBACKDROP_TYPE, ref backdropType, sizeof(int));
+                if (hrExtend == 0 && hrBackdrop == 0)
+                {
+                    window.Background = System.Windows.Media.Brushes.Transparent;
+                    return;
+                }
+            }
+
+            // Fallback solid charcoal on Windows 10 / environments where DWM Mica is unavailable
+            window.Background = new System.Windows.Media.SolidColorBrush(
+                System.Windows.Media.Color.FromRgb(0x14, 0x17, 0x1F));
         }
 
         if (new WindowInteropHelper(window).Handle != IntPtr.Zero)

@@ -23,10 +23,12 @@ public partial class PhoneModelWindow : Window
     public PhoneModelWindow(AppController controller)
     {
         InitializeComponent();
-        WindowPlacementHelper.ApplyModernDarkChrome(this);
+        WindowPlacementHelper.ApplyMicaBackdrop(this);
         _controller = controller;
         RefreshList(string.Empty);
     }
+
+    private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
 
     private void RefreshList(string query)
     {

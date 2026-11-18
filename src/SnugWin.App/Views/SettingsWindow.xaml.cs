@@ -3,9 +3,8 @@ using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Media;
 using SnugWin.App.Controllers;
+using SnugWin.Core.Config;
 using SnugWin.Core.Support;
 using SnugWin.Windows.Support;
 
@@ -20,7 +19,7 @@ public partial class SettingsWindow : Window
     public SettingsWindow(AppController controller, int initialTab = 0)
     {
         InitializeComponent();
-        WindowPlacementHelper.ApplyModernDarkChrome(this);
+        WindowPlacementHelper.ApplyMicaBackdrop(this);
         _controller = controller;
         _controller.UiStateChanged += () => Dispatcher.BeginInvoke(Refresh);
         _controller.UpdateStatusChanged += upd => Dispatcher.BeginInvoke(() => RefreshUpdateUi(upd));
@@ -38,23 +37,29 @@ public partial class SettingsWindow : Window
 
     public void SelectTab(int index)
     {
-        switch (index)
+        PageHome.Visibility = index == 0 ? Visibility.Visible : Visibility.Collapsed;
+        PageGestures.Visibility = index == 1 ? Visibility.Visible : Visibility.Collapsed;
+        PageDiagnostics.Visibility = index == 2 ? Visibility.Visible : Visibility.Collapsed;
+        PageAbout.Visibility = index == 3 ? Visibility.Visible : Visibility.Collapsed;
+
+        bool isHome = index == 0;
+        HeaderBrandGroup.Visibility = isHome ? Visibility.Visible : Visibility.Collapsed;
+        HeaderSubpageGroup.Visibility = isHome ? Visibility.Collapsed : Visibility.Visible;
+        SubpageTitleText.Text = index switch
         {
-            case 1: NavGestures.IsChecked = true; break;
-            case 2: NavDiagnostics.IsChecked = true; break;
-            case 3: NavAbout.IsChecked = true; break;
-            default: NavGeneral.IsChecked = true; break;
-        }
+            1 => "手势与交互细项",
+            2 => "驱动状态与实时日志",
+            3 => "关于与版本更新",
+            _ => string.Empty
+        };
     }
 
-    private void OnNavTabChanged(object sender, RoutedEventArgs e)
-    {
-        if (PageGeneral is null) return;
-        PageGeneral.Visibility = NavGeneral.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
-        PageGestures.Visibility = NavGestures.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
-        PageDiagnostics.Visibility = NavDiagnostics.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
-        PageAbout.Visibility = NavAbout.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
-    }
+    private void OnBackHome(object sender, RoutedEventArgs e) => SelectTab(0);
+    private void OnOpenGesturesTab(object sender, RoutedEventArgs e) => SelectTab(1);
+    private void OnOpenDiagnosticsTab(object sender, RoutedEventArgs e) => SelectTab(2);
+    private void OnOpenAboutTab(object sender, RoutedEventArgs e) => SelectTab(3);
+    private void OnMinimizeClick(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
+    private void OnCloseToTrayClick(object sender, RoutedEventArgs e) => Close();
 
     private void Refresh()
     {
@@ -67,34 +72,38 @@ public partial class SettingsWindow : Window
 
             StatusText.Text = _controller.GetStatusSummary();
             StatusIndicatorDot.Fill = _controller.IsPhoneScreenReady
-                ? new SolidColorBrush(System.Windows.Media.Color.FromRgb(0x34, 0xD3, 0x99))
-                : new SolidColorBrush(System.Windows.Media.Color.FromRgb(0x60, 0xA5, 0xFA));
+                ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x34, 0xD3, 0x99))
+                : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x60, 0xA5, 0xFA));
 
             bool pipeOk = _controller.IsDriverPipeAvailable;
             DiagPipeText.Text = pipeOk
                 ? @"已连接命名管道 \\.\pipe\virtualdisplaydriver"
                 : @"未检测到命名管道 \\.\pipe\virtualdisplaydriver";
 
+            DiagAlertDot.Visibility = pipeOk ? Visibility.Collapsed : Visibility.Visible;
+
             if (!pipeOk)
             {
                 DriverWarningText.Text = _controller.BundledDriverInstallerScript is not null
-                    ? @"未检测到 \\.\pipe\virtualdisplaydriver，本包已内置 virtual-display-rs 0.3.1 安装程序，点击右侧即可校验并自动安装。"
-                    : @"未检测到 \\.\pipe\virtualdisplaydriver，请安装或重启 virtual-display-rs 驱动。";
+                    ? "已内置 virtual-display-rs 0.3.1，点击右侧一键校验安装"
+                    : "请安装或重启 virtual-display-rs 0.3.1 虚拟显示器驱动";
                 if (InstallDriverBtn.IsEnabled)
-                {
-                    InstallDriverBtn.Content = _controller.BundledDriverInstallerScript is not null
-                        ? "一键安装内置驱动"
-                        : "下载驱动...";
-                }
+                    InstallDriverBtn.Content = _controller.BundledDriverInstallerScript is not null ? "一键安装" : "下载驱动";
                 DriverWarningBanner.Visibility = Visibility.Visible;
+                StatusHeroCard.Visibility = Visibility.Collapsed;
             }
             else
             {
                 DriverWarningBanner.Visibility = Visibility.Collapsed;
+                StatusHeroCard.Visibility = Visibility.Visible;
             }
 
-            ElevationText.Text = _controller.IsElevated ? "管理员权限运行中" : "当前权限：普通用户";
+            ElevationText.Text = _controller.IsElevated ? "管理员权限运行中" : "普通用户权限";
             ElevateBtn.Visibility = _controller.IsElevated ? Visibility.Collapsed : Visibility.Visible;
+            HeroReentryBtn.Visibility = _controller.CanReenterPhoneScreen ? Visibility.Visible : Visibility.Collapsed;
+            HeroReadyBadge.Visibility = !_controller.CanReenterPhoneScreen && _controller.IsElevated
+                ? Visibility.Visible
+                : Visibility.Collapsed;
 
             var cfg = _controller.Config;
             PhoneScreenCheck.IsChecked = cfg.PhoneScreen;
@@ -111,16 +120,16 @@ public partial class SettingsWindow : Window
             ScreenshotCheck.IsChecked = cfg.Screenshot;
             ManualPhoneCheck.IsChecked = _controller.ManualOverride;
             AutoCheckUpdatesCheck.IsChecked = cfg.AutoCheckUpdates;
-            PhoneModelText.Text = $"{cfg.Phone.Model ?? "自定义"}（{cfg.Phone.Screen.Width} × {cfg.Phone.Screen.Height}）";
 
-            foreach (ComboBoxItem item in ZoomCombo.Items)
-            {
-                if (item.Tag is string s && int.TryParse(s, out int val) && val == cfg.ZoomSteps)
-                {
-                    ZoomCombo.SelectedItem = item;
-                    break;
-                }
-            }
+            PhoneModelText.Text = cfg.Phone.Model ?? "自定义比例";
+            PhoneSpecText.Text = $"{cfg.Phone.Screen.Width} × {cfg.Phone.Screen.Height} · 200%";
+            double ratio = (double)cfg.Phone.Screen.Width / Math.Max(1, cfg.Phone.Screen.Height);
+            PhoneFrameOutline.Height = 34;
+            PhoneFrameOutline.Width = Math.Clamp(Math.Round(34 * ratio), 14, 28);
+
+            ZoomValueText.Text = cfg.ZoomSteps == 0 ? "0" : $"+{cfg.ZoomSteps}";
+            ZoomMinusBtn.IsEnabled = cfg.ZoomSteps > AppConfig.MinZoomSteps;
+            ZoomPlusBtn.IsEnabled = cfg.ZoomSteps < AppConfig.MaxZoomSteps;
 
             RefreshUpdateUi(_controller.LatestUpdate);
         }
@@ -216,33 +225,26 @@ public partial class SettingsWindow : Window
         if (!_suppressEvents) _controller.SetAutoCheckUpdatesEnabled(AutoCheckUpdatesCheck.IsChecked == true);
     }
 
-    private void OnZoomChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (_suppressEvents) return;
-        if (ZoomCombo.SelectedItem is ComboBoxItem { Tag: string s } && int.TryParse(s, out int val))
-            _controller.SetDefaultZoomSteps(val);
-    }
+    private void OnZoomMinus(object sender, RoutedEventArgs e) =>
+        _controller.SetDefaultZoomSteps(_controller.Config.ZoomSteps - 1);
 
-    private void OnOpenPreview(object sender, RoutedEventArgs e)
-    {
-        _controller.OpenPhonePreview();
-    }
+    private void OnZoomPlus(object sender, RoutedEventArgs e) =>
+        _controller.SetDefaultZoomSteps(_controller.Config.ZoomSteps + 1);
 
-    private void OnOpenModels(object sender, RoutedEventArgs e)
-    {
+    private void OnReenterClick(object sender, RoutedEventArgs e) => _controller.ReenterScreen();
+    private void OnOpenPreview(object sender, RoutedEventArgs e) => _controller.OpenPhonePreview();
+
+    private void OnOpenModels(object sender, RoutedEventArgs e) =>
         new PhoneModelWindow(_controller) { Owner = this }.ShowDialog();
-    }
 
-    private void OnOpenLogDir(object sender, RoutedEventArgs e)
-    {
+    private void OnOpenLogDir(object sender, RoutedEventArgs e) =>
         Process.Start(new ProcessStartInfo { FileName = _controller.LogDirectory, UseShellExecute = true });
-    }
 
     private async void OnInstallDriver(object sender, RoutedEventArgs e)
     {
         InstallDriverBtn.IsEnabled = false;
-        InstallDriverBtn.Content = "正在安装驱动...";
-        DriverWarningText.Text = "正在进行 SHA256 校验、导入驱动签名证书并静默安装，请稍候...";
+        InstallDriverBtn.Content = "安装中...";
+        DriverWarningText.Text = "正在进行 SHA256 校验、导入证书并静默安装，请稍候...";
         try
         {
             var (ready, message) = await _controller.InstallDriverAsync();
@@ -257,9 +259,7 @@ public partial class SettingsWindow : Window
         finally
         {
             InstallDriverBtn.IsEnabled = true;
-            InstallDriverBtn.Content = _controller.BundledDriverInstallerScript is not null
-                ? "一键安装内置驱动"
-                : "下载驱动...";
+            InstallDriverBtn.Content = _controller.BundledDriverInstallerScript is not null ? "一键安装" : "下载驱动";
         }
     }
 
@@ -326,12 +326,13 @@ public partial class SettingsWindow : Window
         });
     }
 
-    private void OnRestartElevated(object sender, RoutedEventArgs e)
+    private async void OnRestartElevated(object sender, RoutedEventArgs e)
     {
-        string? exe = Environment.ProcessPath;
-        if (string.IsNullOrEmpty(exe)) return;
         try
         {
+            string? exe = Environment.ProcessPath;
+            if (string.IsNullOrWhiteSpace(exe)) return;
+            await _controller.ShutdownAsync();
             Process.Start(new ProcessStartInfo
             {
                 FileName = exe,
@@ -342,7 +343,7 @@ public partial class SettingsWindow : Window
         }
         catch (Exception ex)
         {
-            System.Windows.MessageBox.Show($"无法以管理员启动：{ex.Message}", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+            System.Windows.MessageBox.Show($"提权重启取消或失败：{ex.Message}", "SnugWin", MessageBoxButton.OK, MessageBoxImage.Information);
         }
     }
 }
