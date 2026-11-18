@@ -109,6 +109,16 @@ internal static class WindowPlacementHelper
             _ = Win32.DwmSetWindowAttribute(hwnd, Win32.DWMWA_USE_IMMERSIVE_DARK_MODE, ref dark, sizeof(int));
             int round = 2; // DWMWCP_ROUND
             _ = Win32.DwmSetWindowAttribute(hwnd, Win32.DWMWA_WINDOW_CORNER_PREFERENCE, ref round, sizeof(int));
+            // Match Windows 11 native title bar & subtle border to SnugWin's #10141C dark slate canvas (COLORREF 0x00BBGGRR)
+            const int DWMWA_BORDER_COLOR = 34;
+            const int DWMWA_CAPTION_COLOR = 35;
+            const int DWMWA_TEXT_COLOR = 36;
+            int captionColor = 0x001C1410; // #10141C
+            int borderColor = 0x003A2B23;  // #232B3A
+            int textColor = 0x00F9F5F1;    // #F1F5F9
+            _ = Win32.DwmSetWindowAttribute(hwnd, DWMWA_CAPTION_COLOR, ref captionColor, sizeof(int));
+            _ = Win32.DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, ref borderColor, sizeof(int));
+            _ = Win32.DwmSetWindowAttribute(hwnd, DWMWA_TEXT_COLOR, ref textColor, sizeof(int));
         }
 
         if (new WindowInteropHelper(window).Handle != IntPtr.Zero)

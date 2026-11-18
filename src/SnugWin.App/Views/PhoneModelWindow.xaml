@@ -2,12 +2,13 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="选择手机型号与比例"
-        Width="500" Height="660"
+        Width="540" Height="690"
+        MinWidth="460" MinHeight="540"
         WindowStartupLocation="CenterOwner"
         FontFamily="{StaticResource AppFont}"
         Background="{StaticResource BgCanvas}"
         Foreground="{StaticResource TextPrimary}">
-    <Grid Margin="18">
+    <Grid Background="{StaticResource BgCanvas}" Margin="22">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
@@ -15,51 +16,149 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <StackPanel Grid.Row="0" Margin="0,0,0,12">
-            <TextBlock Text="当前机型" FontSize="12" Foreground="{StaticResource TextSecondary}"/>
-            <TextBlock x:Name="CurrentLabel" FontSize="16" FontWeight="SemiBold" Margin="0,2,0,10"/>
+        <!-- Current Model & Custom Aspect Card -->
+        <StackPanel Grid.Row="0" Margin="0,0,0,14">
+            <Grid Margin="0,0,0,12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Border Grid.Column="0" Background="{StaticResource AccentSoftBg}" BorderBrush="{StaticResource AccentSoftBorder}"
+                        BorderThickness="1" CornerRadius="6" Padding="8,3" VerticalAlignment="Center" Margin="0,0,10,0">
+                    <TextBlock Text="当前生效" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource AccentSoftText}"/>
+                </Border>
+                <TextBlock x:Name="CurrentLabel" Grid.Column="1" FontSize="16" FontWeight="SemiBold"
+                           Foreground="{StaticResource TextPrimary}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+            </Grid>
 
-            <Border Background="{StaticResource BgCard}" BorderBrush="{StaticResource BorderSubtle}" BorderThickness="1" CornerRadius="12" Padding="14">
-                <StackPanel>
-                    <TextBlock Text="自定义竖屏分辨率 / 比例（如 1080 × 2400 或 9 × 20）" FontSize="12" Foreground="{StaticResource TextSecondary}" Margin="0,0,0,8"/>
-                    <StackPanel Orientation="Horizontal">
-                        <TextBox x:Name="CustomWidthBox" Style="{StaticResource DarkTextBox}" Width="88"/>
-                        <TextBlock Text=" × " VerticalAlignment="Center" Margin="8,0" Foreground="{StaticResource TextSecondary}"/>
-                        <TextBox x:Name="CustomHeightBox" Style="{StaticResource DarkTextBox}" Width="88"/>
-                        <Button Content="应用自定义" Style="{StaticResource PrimaryButton}" Margin="12,0,0,0" Click="OnApplyCustom"/>
-                    </StackPanel>
-                </StackPanel>
+            <Border Background="{StaticResource BgCard}" BorderBrush="{StaticResource BorderSubtle}" BorderThickness="1" CornerRadius="12" Padding="15,13">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <TextBlock Grid.Row="0" Text="自定义竖屏分辨率 / 比例（例如 1080 × 2400 或 9 × 20）"
+                               FontSize="12" Foreground="{StaticResource TextSecondary}" Margin="0,0,0,10"/>
+                    <Grid Grid.Row="1">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid Grid.Column="0" Width="104" Height="34">
+                            <TextBox x:Name="CustomWidthBox" Style="{StaticResource DarkTextBox}" Padding="10,0"
+                                     VerticalContentAlignment="Center" FontFamily="{StaticResource MonoFont}"/>
+                            <TextBlock Text="宽 (如 1080)" FontSize="11.5" Foreground="{StaticResource TextMuted}"
+                                       VerticalAlignment="Center" Margin="11,0" IsHitTestVisible="False">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding Text, ElementName=CustomWidthBox}" Value="">
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </Grid>
+                        <TextBlock Grid.Column="1" Text="×" FontSize="14" VerticalAlignment="Center" Margin="10,0" Foreground="{StaticResource TextSecondary}"/>
+                        <Grid Grid.Column="2" Width="104" Height="34">
+                            <TextBox x:Name="CustomHeightBox" Style="{StaticResource DarkTextBox}" Padding="10,0"
+                                     VerticalContentAlignment="Center" FontFamily="{StaticResource MonoFont}"/>
+                            <TextBlock Text="高 (如 2400)" FontSize="11.5" Foreground="{StaticResource TextMuted}"
+                                       VerticalAlignment="Center" Margin="11,0" IsHitTestVisible="False">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding Text, ElementName=CustomHeightBox}" Value="">
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </Grid>
+                        <Button Grid.Column="4" Content="应用自定义" Style="{StaticResource PrimaryButton}" Height="34" Padding="16,0" Click="OnApplyCustom"/>
+                    </Grid>
+                </Grid>
             </Border>
         </StackPanel>
 
-        <TextBox x:Name="SearchBox" Grid.Row="1" Style="{StaticResource DarkTextBox}" Margin="0,0,0,12"
-                 TextChanged="OnSearchChanged" ToolTip="搜索品牌或型号（如 iPhone 17、Mate 70、xiaomi）"/>
+        <!-- Search Input with Embedded Vector Icon & Placeholder -->
+        <Grid Grid.Row="1" Margin="0,0,0,12">
+            <TextBox x:Name="SearchBox" Style="{StaticResource DarkTextBox}" Padding="34,8,12,8"
+                     TextChanged="OnSearchChanged" ToolTip="支持品牌或型号模糊搜索（如 iPhone 17、Mate 70、xiaomi）"/>
+            <TextBlock Text="搜索品牌或型号（如 iPhone 17、Mate 70、xiaomi）..."
+                       FontSize="12.5" Foreground="{StaticResource TextMuted}"
+                       VerticalAlignment="Center" Margin="36,0,12,0"
+                       IsHitTestVisible="False">
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock">
+                        <Setter Property="Visibility" Value="Collapsed"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding Text, ElementName=SearchBox}" Value="">
+                                <Setter Property="Visibility" Value="Visible"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+            </TextBlock>
+            <Path Data="M7,12 A5,5 0 1 1 7,2 A5,5 0 1 1 7,12 Z M11,11 L14.5,14.5"
+                  Width="14" Height="14" Stretch="Uniform"
+                  Stroke="{StaticResource TextMuted}" StrokeThickness="1.6"
+                  StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                  HorizontalAlignment="Left" VerticalAlignment="Center" Margin="12,0,0,0"
+                  IsHitTestVisible="False"/>
+        </Grid>
 
+        <!-- Model Catalog List -->
         <ListBox x:Name="ModelList" Grid.Row="2"
                  Background="{StaticResource BgCard}"
                  BorderBrush="{StaticResource BorderSubtle}"
                  BorderThickness="1"
+                 Padding="4"
                  Foreground="{StaticResource TextPrimary}"
                  HorizontalContentAlignment="Stretch"
                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                  MouseDoubleClick="OnModelDoubleClick">
+            <ListBox.Template>
+                <ControlTemplate TargetType="ListBox">
+                    <Border Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="12"
+                            Padding="{TemplateBinding Padding}">
+                        <ScrollViewer Focusable="False">
+                            <ItemsPresenter/>
+                        </ScrollViewer>
+                    </Border>
+                </ControlTemplate>
+            </ListBox.Template>
             <ListBox.ItemContainerStyle>
                 <Style TargetType="ListBoxItem">
                     <Setter Property="Background" Value="Transparent"/>
-                    <Setter Property="Padding" Value="8,6"/>
-                    <Setter Property="Margin" Value="4,2"/>
+                    <Setter Property="Padding" Value="10,8"/>
+                    <Setter Property="Margin" Value="2,2"/>
+                    <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
                     <Setter Property="Template">
                         <Setter.Value>
                             <ControlTemplate TargetType="ListBoxItem">
-                                <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="8" Padding="{TemplateBinding Padding}">
+                                <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                                        BorderBrush="Transparent" BorderThickness="1"
+                                        CornerRadius="8" Padding="{TemplateBinding Padding}">
                                     <ContentPresenter/>
                                 </Border>
                                 <ControlTemplate.Triggers>
                                     <Trigger Property="IsMouseOver" Value="True">
-                                        <Setter TargetName="Bd" Property="Background" Value="#1F2631"/>
+                                        <Setter TargetName="Bd" Property="Background" Value="{StaticResource BgCardElevated}"/>
                                     </Trigger>
                                     <Trigger Property="IsSelected" Value="True">
-                                        <Setter TargetName="Bd" Property="Background" Value="#1E293B"/>
+                                        <Setter TargetName="Bd" Property="Background" Value="#172338"/>
+                                        <Setter TargetName="Bd" Property="BorderBrush" Value="#2A3E63"/>
                                     </Trigger>
                                 </ControlTemplate.Triggers>
                             </ControlTemplate>
@@ -69,23 +168,24 @@
             </ListBox.ItemContainerStyle>
             <ListBox.ItemTemplate>
                 <DataTemplate>
-                    <Grid Margin="4,2">
+                    <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <StackPanel VerticalAlignment="Center">
-                            <TextBlock Text="{Binding DisplayTitle}" FontSize="13.5" FontWeight="SemiBold"/>
-                            <TextBlock Text="{Binding ResolutionText}" FontSize="11.5" Foreground="{StaticResource TextSecondary}" Margin="0,2,0,0"/>
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
+                            <TextBlock Text="{Binding DisplayTitle}" FontSize="13.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimary}"/>
+                            <TextBlock Text="{Binding ResolutionText}" FontFamily="{StaticResource MonoFont}" FontSize="11.5"
+                                       Foreground="{StaticResource TextSecondary}" Margin="0,3,0,0"/>
                         </StackPanel>
-                        <Button Grid.Column="1" Content="选择" Style="{StaticResource PrimaryButton}" Padding="12,5" FontSize="12"
+                        <Button Grid.Column="1" Content="选用" Style="{StaticResource SecondaryButton}" Padding="14,5" FontSize="12"
                                 Click="OnSelectRow" Tag="{Binding}" VerticalAlignment="Center"/>
                     </Grid>
                 </DataTemplate>
             </ListBox.ItemTemplate>
         </ListBox>
 
-        <TextBlock Grid.Row="3" Margin="0,10,0,0" FontSize="11.5" Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap"
-                   Text="提示：更换比例会在线更新手机屏档位；若已在 UU远程 中连接，请切换一下屏幕再切回以确保点击位置精确。"/>
+        <TextBlock Grid.Row="3" Margin="2,12,2,0" FontSize="11.5" Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap"
+                   Text="提示：切换机型比例会在线更新手机屏尺寸；若已在 UU远程 中连接，切换一次屏幕再切回即可同步精确触控坐标。"/>
     </Grid>
 </Window>

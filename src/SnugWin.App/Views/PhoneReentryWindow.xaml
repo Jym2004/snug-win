@@ -10,43 +10,51 @@
         SizeToContent="WidthAndHeight"
         Topmost="True"
         FontFamily="{StaticResource AppFont}">
-    <Border x:Name="PillBorder"
-            Background="#EE161B22"
-            BorderBrush="#403B82F6"
-            BorderThickness="1"
-            CornerRadius="20">
-        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-            <Border Padding="12,8,10,8" CornerRadius="19,0,0,19" Cursor="Hand"
-                    MouseLeftButtonUp="OnReenterClick" Background="Transparent">
-                <Border.Style>
-                    <Style TargetType="Border">
-                        <Style.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter Property="Background" Value="#253B82F6"/>
-                            </Trigger>
-                        </Style.Triggers>
-                    </Style>
-                </Border.Style>
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <Image Source="pack://application:,,,/Assets/snugwin-logo.png" Width="20" Height="20"
-                           RenderOptions.BitmapScalingMode="HighQuality" Margin="0,0,8,0"/>
-                    <TextBlock Text="进入手机屏" FontSize="13.5" FontWeight="SemiBold" Foreground="#F0F6FC" VerticalAlignment="Center"/>
-                </StackPanel>
-            </Border>
-            <Border Width="1" Background="#2B323D" Margin="0,7"/>
-            <Border Padding="9,8,11,8" CornerRadius="0,19,19,0" Cursor="Hand"
-                    MouseLeftButtonUp="OnHidePillClick" Background="Transparent" ToolTip="收起按钮（仍可从托盘菜单重进）">
-                <Border.Style>
-                    <Style TargetType="Border">
-                        <Style.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter Property="Background" Value="#20FFFFFF"/>
-                            </Trigger>
-                        </Style.Triggers>
-                    </Style>
-                </Border.Style>
-                <TextBlock Text="✕" FontSize="11.5" Foreground="#8B949E" VerticalAlignment="Center"/>
-            </Border>
-        </StackPanel>
-    </Border>
+    <Grid Margin="10,6,10,14">
+        <Border x:Name="PillBorder"
+                Background="#F2141923"
+                BorderBrush="#553B82F6"
+                BorderThickness="1"
+                CornerRadius="20">
+            <Border.Effect>
+                <DropShadowEffect Color="Black" Direction="270" ShadowDepth="4" BlurRadius="14" Opacity="0.48"/>
+            </Border.Effect>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <Border Padding="13,8,12,8" CornerRadius="19,0,0,19" Cursor="Hand"
+                        MouseLeftButtonUp="OnReenterClick" Background="Transparent">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Style.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter Property="Background" Value="#253B82F6"/>
+                                </Trigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <Image Source="/SnugWin.App;component/Assets/snugwin-logo.png" Width="19" Height="19"
+                               RenderOptions.BitmapScalingMode="HighQuality" Margin="0,0,8,0"/>
+                        <TextBlock Text="进入手机屏" FontSize="13.5" FontWeight="SemiBold" Foreground="#F1F5F9" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Border>
+                <Border Width="1" Background="#2A3447" Margin="0,8"/>
+                <Border Padding="10,8,12,8" CornerRadius="0,19,19,0" Cursor="Hand"
+                        MouseLeftButtonUp="OnHidePillClick" Background="Transparent" ToolTip="收起按钮（仍可从托盘菜单重进）">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Style.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter Property="Background" Value="#20FFFFFF"/>
+                                </Trigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <Path Data="M3,3 L11,11 M11,3 L3,11"
+                          Width="10" Height="10" Stretch="Uniform"
+                          Stroke="#94A3B8" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                          VerticalAlignment="Center"/>
+                </Border>
+            </StackPanel>
+        </Border>
+    </Grid>
 </Window>
