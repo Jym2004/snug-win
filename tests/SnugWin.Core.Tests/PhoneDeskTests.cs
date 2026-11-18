@@ -62,13 +62,27 @@ public sealed class PhoneDeskTests : IDisposable
 
         public ScreenFit? FitOf(uint displayId) => ActiveId == displayId ? CurrentFit : null;
 
+        public int RetireCount { get; private set; }
         public Task<bool> RetireAsync(uint displayId, CancellationToken ct = default)
         {
+            RetireCount++;
             if (ActiveId == displayId) ActiveId = null;
             return Task.FromResult(true);
         }
 
-        public bool IsOnline(uint displayId) => ActiveId == displayId;
+        public bool Detached { get; set; }
+        public bool RemoteExclusive { get; set; }
+        public int Reactivations { get; private set; }
+        public bool IsOnline(uint displayId) => ActiveId == displayId && !Detached;
+        public bool IsRemoteExclusiveDisplayActive() => RemoteExclusive;
+        public Task<bool> TryReactivateAsync(uint displayId, int width, CancellationToken ct = default)
+        {
+            Reactivations++;
+            if (ActiveId != displayId || RemoteExclusive) return Task.FromResult(false);
+            Detached = false;
+            CurrentWidth = width;
+            return Task.FromResult(true);
+        }
         public int? WidthOf(uint displayId) => ActiveId == displayId ? CurrentWidth : null;
 
         public Task SetWidthAsync(uint displayId, int width, CancellationToken ct = default)
@@ -180,6 +194,55 @@ public sealed class PhoneDeskTests : IDisposable
         Assert.Equal(0, windows.ZoomDeltaTotal);
         Assert.Equal(original, windows.Frames[winKey]);
         Assert.False(File.Exists(_paths.PhoneRecordFile));
+    }
+
+    [Fact]
+    public async Task DisplaysChanged_ReactivatesSnugDisplayAfterTopologyLoss()
+    {
+        var displays = new FakeDisplays();
+        var windows = new FakeWindows();
+        var timeline = new FakeTimeline();
+        var desk = new PhoneDesk(displays, windows, new FakeApps(), _paths, timeline);
+
+        desk.SetWanted(true);
+        await desk.IdleAsync();
+        Assert.Equal(PhoneScreenPhase.Ready, desk.State.ScreenPhase);
+
+        displays.Detached = true;
+        desk.DisplaysChanged();
+        await desk.IdleAsync();
+
+        Assert.True(displays.IsOnline(1001));
+        Assert.Equal(PhoneScreenPhase.Ready, desk.State.ScreenPhase);
+        Assert.Equal(1, displays.Reactivations);
+        Assert.Equal(0, displays.RetireCount);
+    }
+
+    [Fact]
+    public async Task OfflineSnugDisplayWaitsWhileUuExclusivelyOwnsDesktop()
+    {
+        var displays = new FakeDisplays();
+        var windows = new FakeWindows();
+        var timeline = new FakeTimeline();
+        var desk = new PhoneDesk(displays, windows, new FakeApps(), _paths, timeline);
+
+        desk.SetWanted(true);
+        await desk.IdleAsync();
+        displays.Detached = true;
+        displays.RemoteExclusive = true;
+
+        desk.DisplaysChanged();
+        await desk.IdleAsync();
+
+        Assert.Equal(PhoneScreenPhase.Suspended, desk.State.ScreenPhase);
+        Assert.Equal(0, displays.Reactivations);
+        Assert.Equal(0, displays.RetireCount);
+
+        displays.RemoteExclusive = false;
+        desk.DisplaysChanged();
+        await desk.IdleAsync();
+        Assert.True(displays.IsOnline(1001));
+        Assert.Equal(PhoneScreenPhase.Ready, desk.State.ScreenPhase);
     }
 
     [Fact]

@@ -215,6 +215,9 @@ public sealed class SessionAndDisplaySafetyTests
         }
 
         public bool IsOnline(uint displayId) => _online.Contains(displayId);
+        public bool IsRemoteExclusiveDisplayActive() => false;
+        public Task<bool> TryReactivateAsync(uint displayId, int width, CancellationToken ct = default) =>
+            Task.FromResult(_online.Contains(displayId));
         public int? WidthOf(uint displayId) => _fits.TryGetValue(displayId, out var f) ? f.BaseWidth : null;
         public Task SetWidthAsync(uint displayId, int width, CancellationToken ct = default) => Task.CompletedTask;
         public RectD? BoundsOf(uint displayId) => _online.Contains(displayId) ? new RectD(2560, 0, 1080, 1920) : null;

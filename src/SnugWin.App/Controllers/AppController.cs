@@ -192,7 +192,7 @@ public sealed class AppController : ILogSink
 
             bool wantsPhone = _config.PhoneScreen
                               && _session.InEpisode
-                              && ControllerClassifier.WantsPhoneScreen(_session.EpisodeControllers(now));
+                              && (signals.ManualOverride || ControllerClassifier.WantsPhoneScreen(_session.EpisodeControllers(now)));
             _desk.SetWanted(wantsPhone);
             _desk.SetRemote(_session.InEpisode);
 
@@ -719,6 +719,7 @@ public sealed class AppController : ILogSink
         {
             PhoneScreenPhase.Ready => _session.IsConnected ? "远程中（手机屏已就绪）" : "手机屏就绪",
             PhoneScreenPhase.Preparing => "正在创建手机屏...",
+            PhoneScreenPhase.Suspended => "手机屏暂不可用，等待显示布局恢复",
             PhoneScreenPhase.Failed => "建屏失败（重试中）",
             _ => _desk.State.Dismissed && _session.InEpisode
                 ? "远程中（已退出手机屏）"

@@ -20,13 +20,22 @@ public sealed class PhoneDisplayService : IPhoneDisplays, IAsyncDisposable
     private readonly OwnedDisplayStore? _ownedStore;
     private readonly Dictionary<uint, ScreenFit> _fits = new();
     private readonly Dictionary<uint, string> _deviceNames = new();
+    private readonly HashSet<string> _startupPhysicalDevices;
 
     public PhoneDisplayService(VirtualDisplayIpcClient? ipc = null, SnugPaths? paths = null)
     {
         _ipc = ipc ?? new VirtualDisplayIpcClient();
         if (paths is not null)
             _ownedStore = new OwnedDisplayStore(paths.OwnedDisplaysFile);
+        _startupPhysicalDevices = DisplayConfigService.GetActiveMonitors()
+            .Where(m => !IsVirtualDisplay(m.DeviceString))
+            .Select(m => m.DeviceName)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
+
+    private static bool IsVirtualDisplay(string name) =>
+        name.Contains("Virtual", StringComparison.OrdinalIgnoreCase)
+        || name.Contains("VirtuDisplay", StringComparison.OrdinalIgnoreCase);
 
     public async Task CleanupOrphansAsync(CancellationToken ct = default)
     {
@@ -198,6 +207,60 @@ public sealed class PhoneDisplayService : IPhoneDisplays, IAsyncDisposable
         if (!_deviceNames.TryGetValue(displayId, out var devName)) return false;
         return DisplayConfigService.GetActiveMonitors()
             .Any(m => m.DeviceName.Equals(devName, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public bool IsRemoteExclusiveDisplayActive()
+    {
+        if (_startupPhysicalDevices.Count == 0) return false;
+        var active = DisplayConfigService.GetActiveMonitors();
+        bool gameViewerActive = active.Any(m =>
+            m.DeviceString.Contains("GameViewer Virtual Display Adapter", StringComparison.OrdinalIgnoreCase));
+        bool anotherRealDisplayActive = active.Any(m =>
+            !m.DeviceString.Contains("GameViewer Virtual Display Adapter", StringComparison.OrdinalIgnoreCase)
+            && !IsVirtualDisplay(m.DeviceString));
+        bool allOriginalDisplaysMissing = _startupPhysicalDevices.All(name =>
+            active.All(m => !m.DeviceName.Equals(name, StringComparison.OrdinalIgnoreCase)));
+        return gameViewerActive && !anotherRealDisplayActive && allOriginalDisplaysMissing;
+    }
+
+    public async Task<bool> TryReactivateAsync(uint displayId, int width, CancellationToken ct = default)
+    {
+        if (!_deviceNames.TryGetValue(displayId, out var deviceName)
+            || !_fits.TryGetValue(displayId, out var fit)
+            || IsRemoteExclusiveDisplayActive())
+            return false;
+
+        int requestedWidth = fit.Widths.Contains(width) ? width : fit.BaseWidth;
+        var modes = BuildModes(fit);
+        try
+        {
+            await _ipc.NotifyAsync([new VddMonitor(displayId, PhoneScreenSpec.Name, true, modes)], ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"手机屏 #{displayId} 恢复 Notify 失败：{ex.Message}");
+            return false;
+        }
+
+        var (pxW, pxH) = fit.PixelSize(requestedWidth);
+        var active = DisplayConfigService.GetActiveMonitors();
+        int rightEdge = active.Count > 0 ? (int)active.Max(m => m.Bounds.MaxX) : 2560;
+        var sw = Stopwatch.StartNew();
+        while (sw.Elapsed < OnlineTimeout && !ct.IsCancellationRequested)
+        {
+            if (IsOnline(displayId))
+            {
+                await SetWidthAsync(displayId, requestedWidth, ct).ConfigureAwait(false);
+                return true;
+            }
+
+            // Re-enable only the previously bound SnugWin device. Do not use
+            // SDC_TOPOLOGY_EXTEND here: UU's super-screen owns the global topology.
+            DisplayConfigService.TryAttachVirtualDisplay(deviceName, pxW, pxH, rightEdge, 0);
+            await Task.Delay(150, ct).ConfigureAwait(false);
+        }
+        return IsOnline(displayId);
     }
 
     public int? WidthOf(uint displayId)

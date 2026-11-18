@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Windows.Automation;
 using SnugWin.Core.PhoneScreen;
 using SnugWin.Core.Session;
+using SnugWin.Core.Support;
 
 namespace SnugWin.Windows.Windows;
 
@@ -72,32 +74,116 @@ internal static class UiaHelper
 
     private const int MaxUiaDepth = 25;
     private const int MaxUiaNodes = 2048;
+    private static string? _lastUiaError;
 
     public static ControllerTable ReadGameViewerControllers(IEnumerable<IntPtr> hwnds)
     {
         var trees = new List<UuElement>();
-        int nodeCount = 0;
-        bool aborted = false;
-
         foreach (var hwnd in hwnds)
         {
             try
             {
                 var root = AutomationElement.FromHandle(hwnd);
                 if (root is null) continue;
+                if (!Native.Win32.IsWindowVisible(hwnd)
+                    && root.Current.ClassName != "client_ui::home::HomePageMainWindow") continue;
+                int nodeCount = 0;
+                bool aborted = false;
                 var visited = new HashSet<string>(StringComparer.Ordinal);
                 var snapshot = SnapshotElement(root, depth: 0, ref nodeCount, ref aborted, visited);
-                if (aborted) return ControllerTable.Unreadable;
-                if (snapshot is not null) trees.Add(snapshot);
+                if (!aborted && snapshot is not null)
+                {
+                    _lastUiaError = null;
+                    trees.Add(snapshot);
+                }
             }
-            catch
+            catch (Exception ex)
             {
-                // ignore individual UIA window error
+                string key = $"{hwnd.ToInt64():X}:{ex.GetType().Name}";
+                if (!string.Equals(_lastUiaError, key, StringComparison.Ordinal))
+                {
+                    _lastUiaError = key;
+                    Log.Warn($"读取 UU 控制端 UIA 失败（hwnd=0x{hwnd.ToInt64():X}）：{ex.GetType().Name}");
+                }
             }
         }
 
         if (trees.Count == 0) return ControllerTable.Unreadable;
         return ControllerTableParser.ParseWindows(trees);
+    }
+
+    private const string HomePageMainWindowClass = "client_ui::home::HomePageMainWindow";
+
+    /// <summary>
+    /// Qt only builds the "本机被控中" subtree once the home window has actually been shown.
+    /// Reading a window that was created but never displayed yields an empty tree, which makes
+    /// SnugWin treat an unknown controller as a phone. When that happens, briefly park the
+    /// window off-screen, show it without activating, read the tree, then restore it exactly.
+    /// </summary>
+    public static bool TryWakeAndRead(IntPtr hwnd, out ControllerTable table)
+    {
+        table = ControllerTable.Unreadable;
+
+        AutomationElement? root;
+        try { root = AutomationElement.FromHandle(hwnd); }
+        catch { return false; }
+        if (root is null || root.Current.ClassName != HomePageMainWindowClass) return false;
+
+        // Already materialized (for example the user opened UU once): just read it.
+        var existing = SnapshotToTable(root);
+        if (existing is { } ready && ready.Names.Count > 0)
+        {
+            table = ready;
+            return true;
+        }
+
+        if (Native.Win32.GetForegroundWindow() == hwnd) return false;
+        if (!Native.Win32.GetWindowRect(hwnd, out var before)) return false;
+
+        bool wasMinimized = Native.Win32.IsIconic(hwnd);
+        bool wasVisible = Native.Win32.IsWindowVisible(hwnd);
+        try
+        {
+            Native.Win32.SetWindowPos(hwnd, IntPtr.Zero, -32000, -32000, before.Width, before.Height,
+                Native.Win32.SWP_NOZORDER | Native.Win32.SWP_NOACTIVATE | Native.Win32.SWP_NOSIZE);
+            Native.Win32.ShowWindow(hwnd, Native.Win32.SW_SHOWNOACTIVATE);
+            Thread.Sleep(200);
+
+            AutomationElement? woken;
+            try { woken = AutomationElement.FromHandle(hwnd); }
+            catch { woken = null; }
+            if (woken is null) return false;
+            if (woken.Current.ClassName != HomePageMainWindowClass) return false;
+
+            var parsed = SnapshotToTable(woken);
+            if (parsed is null) return false;
+            table = parsed;
+            return true;
+        }
+        finally
+        {
+            Native.Win32.SetWindowPos(hwnd, IntPtr.Zero, before.Left, before.Top, before.Width, before.Height,
+                Native.Win32.SWP_NOZORDER | Native.Win32.SWP_NOACTIVATE);
+            if (wasMinimized) Native.Win32.ShowWindow(hwnd, Native.Win32.SW_MINIMIZE);
+            else if (!wasVisible) Native.Win32.ShowWindow(hwnd, Native.Win32.SW_HIDE);
+        }
+    }
+
+    private static ControllerTable? SnapshotToTable(AutomationElement root)
+    {
+        try
+        {
+            int nodeCount = 0;
+            bool aborted = false;
+            var visited = new HashSet<string>(StringComparer.Ordinal);
+            var snap = SnapshotElement(root, depth: 0, ref nodeCount, ref aborted, visited);
+            if (aborted || snap is null) return null;
+            return ControllerTableParser.ParseWindows([snap]);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static UuElement? SnapshotElement(
@@ -130,7 +216,12 @@ internal static class UiaHelper
                 child = walker.GetNextSibling(child);
             }
 
-            var ct = element.Current.ControlType;
+            var current = element.Current;
+            var ct = current.ControlType;
+            if (current.ClassName == "client_ui::controlled_window::ControllerInfoView")
+                return new UuElement(UuElementKind.ControlledPanel, null, children);
+            if (current.ClassName == "client_ui::controlled_window::ControllerItemWidget")
+                return UuElement.RowNode(children);
             if (ct == ControlType.Text)
             {
                 string name = element.Current.Name ?? string.Empty;

@@ -58,6 +58,24 @@ public sealed class SessionTests
     }
 
     [Fact]
+    public void ConnectionTracker_DropsStalePhoneWhenReadableControllerChangesToDesktop()
+    {
+        var tracker = new ConnectionTracker();
+        var t0 = DateTimeOffset.UtcNow;
+        tracker.Update(new UUSignals(true, ControllerTable.FromNames("iPhone 17"), true), t0);
+
+        Assert.Null(tracker.Update(new UUSignals(true, ControllerTable.Unreadable, true), t0.AddSeconds(1)));
+        Assert.Equal(new[] { "iPhone 17" }, tracker.Controllers);
+
+        var change = tracker.Update(
+            new UUSignals(true, ControllerTable.FromNames("Office-Laptop"), true), t0.AddSeconds(2));
+
+        Assert.IsType<ConnectionEvent.ControllersChanged>(change);
+        Assert.Equal(new[] { "Office-Laptop" }, tracker.Controllers);
+        Assert.False(ControllerClassifier.WantsPhoneScreen(tracker.Controllers));
+    }
+
+    [Fact]
     public void ControllerClassifier_DistinguishesPhoneAndDesktop()
     {
         Assert.Equal(ControllerKind.Phone, ControllerClassifier.Classify("iPhone 16 Pro"));
@@ -99,5 +117,33 @@ public sealed class SessionTests
         ]);
         var recognized = ControllerTableParser.ParseWindows([controlledTree]);
         Assert.Equal(["iPhone 17 Pro"], recognized.Names);
+        Assert.True(recognized.Readable);
+
+        var qtControlledPanel = UuElement.ControlledPanelNode([
+            UuElement.TextNode("本机被控中"),
+            UuElement.RowNode([
+                UuElement.TextNode("Sample-Book"),
+                UuElement.TextNode("远程控制"),
+                UuElement.TextNode("连接时长 00:15")
+            ])
+        ]);
+        var qtRecognized = ControllerTableParser.ParseWindows([qtControlledPanel]);
+        Assert.Equal(["Sample-Book"], qtRecognized.Names);
+        Assert.True(qtRecognized.Readable);
+        Assert.Equal(ControllerKind.Desktop, ControllerClassifier.Classify(qtRecognized.Names[0]));
+    }
+
+    [Fact]
+    public void ManualOverride_DoesNotPolluteControllerGroupAfterTurningOff()
+    {
+        var session = new RemoteSession();
+        var t0 = DateTimeOffset.UtcNow;
+
+        session.Update(
+            new UUSignals(true, ControllerTable.FromNames("Office-Laptop"), true) { ManualOverride = true },
+            t0);
+
+        Assert.Equal(["Office-Laptop"], session.EpisodeControllers(t0));
+        Assert.False(ControllerClassifier.WantsPhoneScreen(session.EpisodeControllers(t0)));
     }
 }
