@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using SnugWin.Core.Persistence;
 using SnugWin.Core.PhoneScreen;
 using SnugWin.Core.Support;
 
@@ -16,21 +17,35 @@ public sealed class PhoneDisplayService : IPhoneDisplays, IAsyncDisposable
     private static readonly TimeSpan OfflineTimeout = TimeSpan.FromSeconds(10);
 
     private readonly VirtualDisplayIpcClient _ipc;
+    private readonly OwnedDisplayStore? _ownedStore;
     private readonly Dictionary<uint, ScreenFit> _fits = new();
     private readonly Dictionary<uint, string> _deviceNames = new();
 
-    public PhoneDisplayService(VirtualDisplayIpcClient? ipc = null)
+    public PhoneDisplayService(VirtualDisplayIpcClient? ipc = null, SnugPaths? paths = null)
     {
         _ipc = ipc ?? new VirtualDisplayIpcClient();
+        if (paths is not null)
+            _ownedStore = new OwnedDisplayStore(paths.OwnedDisplaysFile);
     }
 
     public async Task CleanupOrphansAsync(CancellationToken ct = default)
     {
-        if (!VirtualDisplayIpcClient.IsDriverPipeAvailable()) return;
+        if (_ownedStore is null) return;
+        var ownedIds = _ownedStore.LoadIds();
+        if (ownedIds.Count == 0) return;
+
+        if (!VirtualDisplayIpcClient.IsDriverPipeAvailable())
+        {
+            _ownedStore.ClearAll();
+            return;
+        }
+
         try
         {
-            await _ipc.RemoveAllAsync(ct).ConfigureAwait(false);
+            await _ipc.RemoveAsync(ownedIds.ToArray(), ct).ConfigureAwait(false);
             await Task.Delay(300, ct).ConfigureAwait(false);
+            _ownedStore.ClearAll();
+            Log.Info($"已按归属记录清理残留手机屏：#{string.Join(", #", ownedIds)}");
         }
         catch (Exception ex)
         {
@@ -85,6 +100,7 @@ public sealed class PhoneDisplayService : IPhoneDisplays, IAsyncDisposable
 
             _fits[candidateId] = fit;
             _deviceNames[candidateId] = snapshot.DeviceName;
+            _ownedStore?.RecordOwned(candidateId);
 
             await SetWidthAsync(candidateId, fit.BaseWidth, ct).ConfigureAwait(false);
             return candidateId;
@@ -140,6 +156,7 @@ public sealed class PhoneDisplayService : IPhoneDisplays, IAsyncDisposable
         try
         {
             await _ipc.RemoveAsync([displayId], ct).ConfigureAwait(false);
+            _ownedStore?.ReleaseOwned(displayId);
         }
         catch (Exception ex)
         {

@@ -107,7 +107,7 @@ public sealed class AppController : ILogSink
         _config = _config with { Phone = Catalog.Resolve(_config.Phone) };
         _configStore.Save(_config);
 
-        _displays = new PhoneDisplayService();
+        _displays = new PhoneDisplayService(paths: _paths);
         _windows = new WindowService();
         _apps = new AppService(_windows);
         _touchHook = new TouchHookService();

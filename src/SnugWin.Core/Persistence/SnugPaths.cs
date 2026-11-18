@@ -15,5 +15,6 @@ public sealed record SnugPaths(string DataDirectory)
     public string PhoneRecordFile => Path.Combine(DataDirectory, "phone-screen.json");
     public string ZoomBookFile => Path.Combine(DataDirectory, "zoom.json");
     public string LeftBehindFile => Path.Combine(DataDirectory, "left-behind.json");
+    public string OwnedDisplaysFile => Path.Combine(DataDirectory, "owned-displays.json");
     public string LogDirectory => Path.Combine(DataDirectory, "logs");
 }
