@@ -12,22 +12,21 @@ using SnugWin.Windows.Windows;
 namespace SnugWin.Windows.Sensing;
 
 /// <summary>
-/// Observes NetEase UU Remote (GameViewer) on Windows via multiple local signals:
+/// Observes NetEase UU Remote (GameViewer) on Windows via local signals:
 /// 1. Visible windows owned by GameViewerServer (if floating ball/overlay is enabled);
 /// 2. UI Automation inspection of GameViewer main window ("本机被控中" controller list);
-/// 3. Active non-443/non-80 TCP peer connections on GameViewerServer (e.g. LAN/relay stream);
-/// 4. Continuous byte growth of GameViewerServer streamer log (streamer_log_controlled_*_<pid>.slog).
+/// 3. Continuous byte growth of GameViewerServer streamer log (streamer_log_controlled_*_<pid>.slog);
+/// Diagnostic context only: active non-443/non-80 TCP peer sockets on GameViewerServer (never triggers presence alone).
 /// </summary>
 public sealed class UUSensor
 {
-    private DateTimeOffset _prevLogSizeAdvance = DateTimeOffset.MinValue;
-    private DateTimeOffset _lastLogSizeAdvance = DateTimeOffset.MinValue;
-    private long _lastObservedLogBytes = -1;
+    private readonly StreamLogActivityTracker _streamLog = new();
     private int _lastServerPid;
     private string? _resolvedLogDir;
     private bool _loggedLogReadError;
 
     public bool ManualOverride { get; set; }
+    public bool LastPeerTcpObserved { get; private set; }
 
     public UUSignals Sample(DateTimeOffset now)
     {
@@ -101,68 +100,45 @@ public sealed class UUSensor
         if (serverPid is not { } pid)
         {
             _lastServerPid = 0;
-            _lastObservedLogBytes = -1;
-            _prevLogSizeAdvance = DateTimeOffset.MinValue;
-            _lastLogSizeAdvance = DateTimeOffset.MinValue;
             _resolvedLogDir = null;
-            return false;
+            LastPeerTcpObserved = false;
+            return _streamLog.Observe(null, null, false, now);
         }
 
         if (pid != _lastServerPid)
         {
             _lastServerPid = pid;
-            _lastObservedLogBytes = -1;
-            _prevLogSizeAdvance = DateTimeOffset.MinValue;
-            _lastLogSizeAdvance = DateTimeOffset.MinValue;
             _resolvedLogDir = ResolveServerLogDir(pid);
             _loggedLogReadError = false;
         }
 
-        // Signal A: GameViewerServer has an established non-443/non-80 peer TCP connection (e.g. port 2533/2091)
-        if (HasActivePeerTcpConnection(pid))
-            return true;
+        // TCP peer connections are recorded for diagnostics only; never treat lingering control/keepalive sockets as active streaming.
+        LastPeerTcpObserved = HasActivePeerTcpConnection(pid);
 
-        // Signal B: continuous byte growth of streamer_log_controlled_*_<pid>.slog (>= 2 writes within 3s, max 2s hold)
-        // A single isolated log flush (idle heartbeat / post-disconnect stats flush) must NOT trigger a phantom session.
         string? logDir = _resolvedLogDir ??= ResolveServerLogDir(pid);
-        if (!string.IsNullOrEmpty(logDir) && Directory.Exists(logDir))
+        if (string.IsNullOrEmpty(logDir) || !Directory.Exists(logDir))
+            return _streamLog.Observe(pid, null, false, now);
+
+        try
         {
-            try
-            {
-                var files = Directory.EnumerateFiles(logDir, $"streamer_log_controlled_*_{pid}.slog")
-                    .Select(p => new FileInfo(p))
-                    .ToList();
-                if (files.Count > 0)
-                {
-                    long totalBytes = files.Sum(f => f.Length);
-                    if (_lastObservedLogBytes < 0)
-                    {
-                        _lastObservedLogBytes = totalBytes;
-                    }
-                    else if (totalBytes > _lastObservedLogBytes)
-                    {
-                        _lastObservedLogBytes = totalBytes;
-                        _prevLogSizeAdvance = _lastLogSizeAdvance;
-                        _lastLogSizeAdvance = now;
-                    }
+            var files = Directory.EnumerateFiles(logDir, $"streamer_log_controlled_*_{pid}.slog")
+                .Select(p => new FileInfo(p))
+                .ToList();
+            if (files.Count == 0)
+                return _streamLog.Observe(pid, null, false, now);
 
-                    bool continuous = _prevLogSizeAdvance != DateTimeOffset.MinValue
-                                      && (_lastLogSizeAdvance - _prevLogSizeAdvance).TotalSeconds <= 3.0;
-                    if (continuous && (now - _lastLogSizeAdvance).TotalSeconds < 2.0)
-                        return true;
-                }
-            }
-            catch (Exception ex)
-            {
-                if (!_loggedLogReadError)
-                {
-                    _loggedLogReadError = true;
-                    Log.Warn($"读取 UU 推流日志目录失败（{logDir}）：{ex.Message}");
-                }
-            }
+            long totalBytes = files.Sum(f => f.Length);
+            return _streamLog.Observe(pid, totalBytes, true, now);
         }
-
-        return false;
+        catch (Exception ex)
+        {
+            if (!_loggedLogReadError)
+            {
+                _loggedLogReadError = true;
+                Log.Warn($"读取 UU 推流日志目录失败（{logDir}）：{ex.Message}");
+            }
+            return _streamLog.Observe(pid, null, false, now);
+        }
     }
 
     private static string? ResolveServerLogDir(int serverPid)
