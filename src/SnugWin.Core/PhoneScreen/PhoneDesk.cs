@@ -214,6 +214,14 @@ public sealed class PhoneDesk
         });
     }
 
+    public void ReenterScreen()
+    {
+        if (!_wanted || !State.Dismissed) return;
+        State = State with { Dismissed = false, Notice = null };
+        Log.Info("同会话重新进入手机屏：恢复建屏");
+        _ = _lane.Run(ReconcileAsync);
+    }
+
     public void Pull(WindowInfo window)
     {
         if (State.Quitting.Contains(window.Key.Pid))

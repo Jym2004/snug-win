@@ -53,6 +53,8 @@ public sealed class AppController : ILogSink
     private ScreenshotOverlayWindow? _screenshotOverlayWindow;
     private CropWindow? _cropWindow;
     private CopySelectionBubbleWindow? _copyBubbleWindow;
+    private PhoneReentryWindow? _reentryWindow;
+    private bool _reentryPillHidden;
     private CapturedImage? _cropWindowImage;
     private bool _shuttingDown;
     private int _sampling;
@@ -84,6 +86,7 @@ public sealed class AppController : ILogSink
     public bool IsElevated => new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
     public string LogDirectory => _paths.LogDirectory;
     public bool IsPhoneScreenReady => _desk.State.ScreenPhase == PhoneScreenPhase.Ready;
+    public bool CanReenterPhoneScreen => _config.PhoneScreen && _desk.State.Dismissed && (_session.InEpisode || _sensor.ManualOverride);
     public IReadOnlyList<RunningApp> RunningApps => _runningApps;
     public IReadOnlyList<AppInfo> InstalledApps => _installedApps;
 
@@ -211,6 +214,7 @@ public sealed class AppController : ILogSink
 
             SyncTouchRegion();
             SyncPhoneWindows(forceSyncUi: false);
+            SyncReentryWindow();
             NotifySummary();
         }
         finally
@@ -380,8 +384,11 @@ public sealed class AppController : ILogSink
             _phoneHomeWindow?.Hide();
             _homeBarWindow?.Hide();
             HideAndDisposeScreenshotWindows();
+            SyncReentryWindow();
             return;
         }
+
+        SyncReentryWindow();
 
         bool changed = forceSyncUi
                        || !Equals(st, _lastSyncedPhoneState)
@@ -655,6 +662,41 @@ public sealed class AppController : ILogSink
     public void DismissNotice() => _desk.DismissNotice();
     public void DismissScreen() => _desk.DismissScreen();
 
+    public void ReenterScreen()
+    {
+        _reentryPillHidden = false;
+        _reentryWindow?.Hide();
+        _desk.ReenterScreen();
+        NotifySummary();
+        UiStateChanged?.Invoke();
+    }
+
+    public void HideReentryPill()
+    {
+        _reentryPillHidden = true;
+        _reentryWindow?.Hide();
+    }
+
+    private void SyncReentryWindow()
+    {
+        if (!CanReenterPhoneScreen)
+        {
+            _reentryPillHidden = false;
+            _reentryWindow?.Hide();
+            return;
+        }
+        if (_reentryPillHidden || _shuttingDown)
+        {
+            _reentryWindow?.Hide();
+            return;
+        }
+        if (_displays.MainArea() is not { } mainArea)
+            return;
+
+        _reentryWindow ??= new PhoneReentryWindow(this);
+        _reentryWindow.ShowAtBottomRight(mainArea);
+    }
+
     public void TakeScreenshot()
     {
         if (_desk.State.Placed is not { } placed) return;
@@ -678,7 +720,9 @@ public sealed class AppController : ILogSink
             PhoneScreenPhase.Ready => _session.IsConnected ? "远程中（手机屏已就绪）" : "手机屏就绪",
             PhoneScreenPhase.Preparing => "正在创建手机屏...",
             PhoneScreenPhase.Failed => "建屏失败（重试中）",
-            _ => _session.IsConnected ? "远程中" : "待机中"
+            _ => _desk.State.Dismissed && _session.InEpisode
+                ? "远程中（已退出手机屏）"
+                : (_session.IsConnected ? "远程中" : "待机中")
         };
     }
 
@@ -726,6 +770,7 @@ public sealed class AppController : ILogSink
         await _desk.ShutdownAsync();
         await _displays.DisposeAsync();
         HideAndDisposeScreenshotWindows();
+        _reentryWindow?.Close();
         _copyBubbleWindow?.Close();
         _phoneHomeWindow?.Close();
         _homeBarWindow?.Close();

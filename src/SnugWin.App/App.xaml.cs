@@ -23,6 +23,7 @@ public partial class App : System.Windows.Application
     private System.Drawing.Icon? _idleTrayIcon;
     private System.Drawing.Icon? _connectedTrayIcon;
     private System.Windows.Forms.ToolStripMenuItem? _statusMenuItem;
+    private System.Windows.Forms.ToolStripMenuItem? _reentryMenuItem;
     private System.Windows.Forms.ToolStripMenuItem? _manualPhoneMenuItem;
     private System.Windows.Forms.ToolStripMenuItem? _updateMenuItem;
     private bool _notifiedUpdate;
@@ -57,6 +58,7 @@ public partial class App : System.Windows.Application
                         _trayIcon.Icon = desiredIcon;
                 }
                 if (_manualPhoneMenuItem is not null) _manualPhoneMenuItem.Checked = _controller.ManualOverride;
+                if (_reentryMenuItem is not null) _reentryMenuItem.Visible = _controller.CanReenterPhoneScreen;
             });
         };
 
@@ -105,6 +107,13 @@ public partial class App : System.Windows.Application
         _updateMenuItem = new System.Windows.Forms.ToolStripMenuItem("检查更新...");
         _updateMenuItem.Click += (_, _) => Dispatcher.Invoke(() => ShowSettings(3));
         menu.Items.Add(_updateMenuItem);
+
+        _reentryMenuItem = new System.Windows.Forms.ToolStripMenuItem("重新进入手机屏")
+        {
+            Visible = false
+        };
+        _reentryMenuItem.Click += (_, _) => Dispatcher.Invoke(() => _controller?.ReenterScreen());
+        menu.Items.Add(_reentryMenuItem);
 
         _manualPhoneMenuItem = new System.Windows.Forms.ToolStripMenuItem("手动开启手机屏（测试/兜底）")
         {
