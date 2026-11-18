@@ -88,6 +88,8 @@ public sealed class AppController : ILogSink
     public string LogDirectory => _paths.LogDirectory;
     public bool IsPhoneScreenReady => _desk.State.ScreenPhase == PhoneScreenPhase.Ready;
     public bool CanReenterPhoneScreen => _config.PhoneScreen && _desk.State.Dismissed && (_session.InEpisode || _sensor.ManualOverride);
+    public AppThemeMode ThemeMode => _config.Theme;
+    public bool IsEffectiveDarkTheme => ResolveIsDarkTheme(_config.Theme);
     public IReadOnlyList<RunningApp> RunningApps => _runningApps;
     public IReadOnlyList<AppInfo> InstalledApps => _installedApps;
 
@@ -95,6 +97,7 @@ public sealed class AppController : ILogSink
     public event Action? UiStateChanged;
     public event Action<string>? LogAppended;
     public event Action<UpdateCheckResult?>? UpdateStatusChanged;
+    public event Action<bool>? ThemeChanged;
 
     public AppController(Dispatcher dispatcher)
     {
@@ -134,6 +137,8 @@ public sealed class AppController : ILogSink
         _touchHook.SelectionCompleted += pt => _dispatcher.BeginInvoke(() => ShowCopySelectionBubble(pt));
         _touchHook.SelectionDismissed += () => _dispatcher.BeginInvoke(() => _copyBubbleWindow?.HideBubble());
         SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
+        SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
+        ApplyThemeResources(IsEffectiveDarkTheme);
 
         _tickTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
         _tickTimer.Tick += (_, _) => OnTick();
@@ -698,6 +703,67 @@ public sealed class AppController : ILogSink
         UiStateChanged?.Invoke();
     }
 
+    public void SetThemeMode(AppThemeMode mode)
+    {
+        var sanitized = Enum.IsDefined(mode) ? mode : AppThemeMode.Light;
+        _config = _config with { Theme = sanitized };
+        _configStore.Save(_config);
+        bool isDark = ResolveIsDarkTheme(sanitized);
+        ApplyThemeResources(isDark);
+        ThemeChanged?.Invoke(isDark);
+        UiStateChanged?.Invoke();
+    }
+
+    private void OnUserPreferenceChanged(object? sender, UserPreferenceChangedEventArgs e)
+    {
+        if (_config.Theme != AppThemeMode.Auto) return;
+        _ = _dispatcher.BeginInvoke(() =>
+        {
+            bool isDark = ResolveIsDarkTheme(AppThemeMode.Auto);
+            ApplyThemeResources(isDark);
+            ThemeChanged?.Invoke(isDark);
+            UiStateChanged?.Invoke();
+        });
+    }
+
+    public static bool ResolveIsDarkTheme(AppThemeMode mode) => mode switch
+    {
+        AppThemeMode.Dark => true,
+        AppThemeMode.Light => false,
+        _ => IsSystemAppsDarkTheme()
+    };
+
+    private static bool IsSystemAppsDarkTheme()
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+            if (key?.GetValue("AppsUseLightTheme") is int val)
+                return val == 0;
+        }
+        catch
+        {
+        }
+        return false;
+    }
+
+    public static void ApplyThemeResources(bool isDark)
+    {
+        var app = System.Windows.Application.Current;
+        if (app is null) return;
+        var uri = new Uri(
+            isDark
+                ? "pack://application:,,,/SnugWin.App;component/Themes/ThemeDark.xaml"
+                : "pack://application:,,,/SnugWin.App;component/Themes/ThemeLight.xaml",
+            UriKind.Absolute);
+        var dict = new System.Windows.ResourceDictionary { Source = uri };
+        var merged = app.Resources.MergedDictionaries;
+        if (merged.Count > 0)
+            merged[0] = dict;
+        else
+            merged.Insert(0, dict);
+    }
+
     public void SelectPhone(PhoneChoice choice)
     {
         var resolved = Catalog.Resolve(choice);
@@ -880,6 +946,7 @@ public sealed class AppController : ILogSink
         _shuttingDown = true;
         _tickTimer.Stop();
         SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
+        SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
         _touchHook.Dispose();
         await _desk.ShutdownAsync();
         await _displays.DisposeAsync();

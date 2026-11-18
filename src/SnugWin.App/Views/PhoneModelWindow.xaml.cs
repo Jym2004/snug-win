@@ -19,12 +19,16 @@ public partial class PhoneModelWindow : Window
     }
 
     private readonly AppController _controller;
+    private readonly Action<bool> _themeHandler;
 
     public PhoneModelWindow(AppController controller)
     {
         InitializeComponent();
-        WindowPlacementHelper.ApplyMicaBackdrop(this);
         _controller = controller;
+        WindowPlacementHelper.ApplyMicaBackdrop(this, _controller.IsEffectiveDarkTheme);
+        _themeHandler = isDark => Dispatcher.BeginInvoke(() => WindowPlacementHelper.ApplyMicaBackdrop(this, isDark));
+        _controller.ThemeChanged += _themeHandler;
+        Closed += (_, _) => _controller.ThemeChanged -= _themeHandler;
         RefreshList(string.Empty);
     }
 

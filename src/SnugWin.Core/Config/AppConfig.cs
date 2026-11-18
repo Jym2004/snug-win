@@ -5,6 +5,14 @@ using SnugWin.Core.PhoneScreen;
 
 namespace SnugWin.Core.Config;
 
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum AppThemeMode
+{
+    Light = 0,
+    Dark = 1,
+    Auto = 2
+}
+
 public sealed record AppConfig
 {
     public const int MinZoomSteps = 0;
@@ -19,6 +27,7 @@ public sealed record AppConfig
     public bool Screenshot { get; init; } = false;
     public bool AutoCheckUpdates { get; init; } = true;
     public int ZoomSteps { get; init; } = 2;
+    public AppThemeMode Theme { get; init; } = AppThemeMode.Light;
     public PhoneChoice Phone { get; init; } = PhoneChoice.Standard;
     public bool Welcomed { get; init; } = false;
     public string? LastVersion { get; init; }
@@ -26,9 +35,11 @@ public sealed record AppConfig
     public AppConfig Sanitize()
     {
         var phone = Phone.Screen.IsValid ? Phone : PhoneChoice.Standard;
+        var theme = Enum.IsDefined(Theme) ? Theme : AppThemeMode.Light;
         return this with
         {
             ZoomSteps = ZoomSteps.Clamp(MinZoomSteps, MaxZoomSteps),
+            Theme = theme,
             Phone = phone
         };
     }

@@ -13,21 +13,42 @@ namespace SnugWin.App.Views;
 public partial class SettingsWindow : Window
 {
     private readonly AppController _controller;
+    private readonly Action _uiChangedHandler;
+    private readonly Action<UpdateCheckResult?> _updateHandler;
+    private readonly Action<string> _logHandler;
+    private readonly Action<bool> _themeHandler;
     private bool _suppressEvents;
     private bool _isUpdating;
 
     public SettingsWindow(AppController controller, int initialTab = 0)
     {
         InitializeComponent();
-        WindowPlacementHelper.ApplyMicaBackdrop(this);
         _controller = controller;
-        _controller.UiStateChanged += () => Dispatcher.BeginInvoke(Refresh);
-        _controller.UpdateStatusChanged += upd => Dispatcher.BeginInvoke(() => RefreshUpdateUi(upd));
-        _controller.LogAppended += line => Dispatcher.BeginInvoke(() =>
+        WindowPlacementHelper.ApplyMicaBackdrop(this, _controller.IsEffectiveDarkTheme);
+        _uiChangedHandler = () => Dispatcher.BeginInvoke(Refresh);
+        _updateHandler = upd => Dispatcher.BeginInvoke(() => RefreshUpdateUi(upd));
+        _logHandler = line => Dispatcher.BeginInvoke(() =>
         {
             LogBox.AppendText(line + Environment.NewLine);
             LogBox.ScrollToEnd();
         });
+        _themeHandler = isDark => Dispatcher.BeginInvoke(() =>
+        {
+            WindowPlacementHelper.ApplyMicaBackdrop(this, isDark);
+            Refresh();
+        });
+
+        _controller.UiStateChanged += _uiChangedHandler;
+        _controller.UpdateStatusChanged += _updateHandler;
+        _controller.LogAppended += _logHandler;
+        _controller.ThemeChanged += _themeHandler;
+        Closed += (_, _) =>
+        {
+            _controller.UiStateChanged -= _uiChangedHandler;
+            _controller.UpdateStatusChanged -= _updateHandler;
+            _controller.LogAppended -= _logHandler;
+            _controller.ThemeChanged -= _themeHandler;
+        };
 
         LogBox.Text = string.Join(Environment.NewLine, _controller.GetRecentLogs()) + Environment.NewLine;
         LogBox.ScrollToEnd();
@@ -131,6 +152,10 @@ public partial class SettingsWindow : Window
             ZoomMinusBtn.IsEnabled = cfg.ZoomSteps > AppConfig.MinZoomSteps;
             ZoomPlusBtn.IsEnabled = cfg.ZoomSteps < AppConfig.MaxZoomSteps;
 
+            ThemeLightBtn.IsChecked = cfg.Theme == AppThemeMode.Light;
+            ThemeDarkBtn.IsChecked = cfg.Theme == AppThemeMode.Dark;
+            ThemeAutoBtn.IsChecked = cfg.Theme == AppThemeMode.Auto;
+
             RefreshUpdateUi(_controller.LatestUpdate);
         }
         finally
@@ -230,6 +255,14 @@ public partial class SettingsWindow : Window
 
     private void OnZoomPlus(object sender, RoutedEventArgs e) =>
         _controller.SetDefaultZoomSteps(_controller.Config.ZoomSteps + 1);
+
+    private void OnThemeModeChanged(object sender, RoutedEventArgs e)
+    {
+        if (_suppressEvents) return;
+        if (sender == ThemeLightBtn) _controller.SetThemeMode(AppThemeMode.Light);
+        else if (sender == ThemeDarkBtn) _controller.SetThemeMode(AppThemeMode.Dark);
+        else if (sender == ThemeAutoBtn) _controller.SetThemeMode(AppThemeMode.Auto);
+    }
 
     private void OnReenterClick(object sender, RoutedEventArgs e) => _controller.ReenterScreen();
     private void OnOpenPreview(object sender, RoutedEventArgs e) => _controller.OpenPhonePreview();

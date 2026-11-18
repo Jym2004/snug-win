@@ -6,17 +6,9 @@
         ResizeMode="NoResize"
         ShowInTaskbar="False"
         Topmost="True"
-        Background="#000000"
-        Foreground="#FFFFFF">
+        Background="{DynamicResource PhoneBg}"
+        Foreground="{DynamicResource PhoneTextPrimary}">
     <Window.Resources>
-        <SolidColorBrush x:Key="PhoneBg" Color="#000000"/>
-        <SolidColorBrush x:Key="CardBg" Color="#1C1C1E"/>
-        <SolidColorBrush x:Key="FillBg" Color="#2C2C2E"/>
-        <SolidColorBrush x:Key="SegmentBg" Color="#636366"/>
-        <SolidColorBrush x:Key="TintBlue" Color="#0A84FF"/>
-        <SolidColorBrush x:Key="SecondaryText" Color="#98989F"/>
-        <SolidColorBrush x:Key="DividerBrush" Color="#38383A"/>
-
         <Style x:Key="FlatBtn" TargetType="Button">
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="BorderThickness" Value="0"/>
@@ -46,7 +38,7 @@
 
         <!-- AppCard DataTemplate -->
         <DataTemplate x:Key="AppCardTemplate">
-            <Border Background="{StaticResource CardBg}" CornerRadius="12" Margin="0,0,0,12">
+            <Border Background="{DynamicResource PhoneCardBg}" CornerRadius="12" Margin="0,0,0,12">
                 <StackPanel>
                     <!-- App Header -->
                     <Grid Margin="16,12,12,12">
@@ -66,7 +58,7 @@
                                 </Grid.ColumnDefinitions>
                                 <Image Grid.Column="0" Source="{Binding Icon}" Width="44" Height="44" RenderOptions.BitmapScalingMode="HighQuality"/>
                                 <StackPanel Grid.Column="1" Margin="14,0,8,0" VerticalAlignment="Center">
-                                    <TextBlock Text="{Binding AppName}" FontSize="20" FontWeight="SemiBold" Foreground="White" TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock Text="{Binding AppName}" FontSize="20" FontWeight="SemiBold" Foreground="{DynamicResource PhoneTextPrimary}" TextTrimming="CharacterEllipsis"/>
                                     <TextBlock Text="{Binding Subtitle}" FontSize="15" Foreground="{Binding SubtitleBrush}" TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/>
                                 </StackPanel>
                             </Grid>
@@ -77,22 +69,22 @@
                             <StackPanel Orientation="Horizontal" Visibility="{Binding NormalActionsVis}">
                                 <Button Style="{StaticResource FlatBtn}" Padding="0" Width="48" Height="48" Margin="0,0,8,0"
                                         Click="OnNewWindow" Tag="{Binding App}" ToolTip="新建窗口">
-                                    <Border Width="48" Height="48" CornerRadius="24" Background="{StaticResource PhoneBg}">
-                                        <TextBlock Text="+" FontSize="24" Foreground="{StaticResource TintBlue}" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0"/>
+                                    <Border Width="48" Height="48" CornerRadius="24" Background="{DynamicResource PhoneBg}">
+                                        <TextBlock Text="+" FontSize="24" Foreground="{DynamicResource PhoneTintBlue}" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0"/>
                                     </Border>
                                 </Button>
                                 <Button Style="{StaticResource FlatBtn}" Padding="0" Width="48" Height="48"
                                         Click="OnAskQuitApp" Tag="{Binding}" ToolTip="退出 App">
-                                    <Border Width="48" Height="48" CornerRadius="24" Background="{StaticResource PhoneBg}">
-                                        <TextBlock Text="×" FontSize="22" Foreground="#98989F" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0"/>
+                                    <Border Width="48" Height="48" CornerRadius="24" Background="{DynamicResource PhoneBg}">
+                                        <TextBlock Text="×" FontSize="22" Foreground="{DynamicResource PhoneSecondaryText}" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0"/>
                                     </Border>
                                 </Button>
                             </StackPanel>
 
                             <StackPanel Orientation="Horizontal" Visibility="{Binding AskQuitVis}">
                                 <Button Style="{StaticResource FlatBtn}" Padding="0" Margin="0,0,8,0" Click="OnCancelConfirm">
-                                    <Border Height="40" CornerRadius="20" Background="{StaticResource PhoneBg}" Padding="16,0">
-                                        <TextBlock Text="取消" FontSize="16" FontWeight="Medium" Foreground="White" VerticalAlignment="Center"/>
+                                    <Border Height="40" CornerRadius="20" Background="{DynamicResource PhoneBg}" Padding="16,0">
+                                        <TextBlock Text="取消" FontSize="16" FontWeight="Medium" Foreground="{DynamicResource PhoneTextPrimary}" VerticalAlignment="Center"/>
                                     </Border>
                                 </Button>
                                 <Button Style="{StaticResource FlatBtn}" Padding="0" Click="OnConfirmQuitApp" Tag="{Binding App}">
@@ -102,7 +94,7 @@
                                 </Button>
                             </StackPanel>
 
-                            <TextBlock Text="退出中..." FontSize="14" Foreground="{StaticResource SecondaryText}"
+                            <TextBlock Text="退出中..." FontSize="14" Foreground="{DynamicResource PhoneSecondaryText}"
                                        VerticalAlignment="Center" Visibility="{Binding QuittingVis}" Margin="8,0"/>
                         </StackPanel>
                     </Grid>
@@ -112,7 +104,7 @@
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
                                 <StackPanel>
-                                    <Rectangle Height="1" Fill="{StaticResource DividerBrush}" Margin="76,0,0,0"/>
+                                    <Rectangle Height="1" Fill="{DynamicResource PhoneDividerBrush}" Margin="76,0,0,0"/>
                                     <Grid Height="56" Margin="16,0,12,0">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
@@ -134,11 +126,11 @@
                                                 <TextBlock Grid.Column="1" Text="{Binding DisplayTitle}" FontSize="17" Foreground="{Binding TitleBrush}"
                                                            VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="14,0,8,0"/>
                                                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Visibility="{Binding TagsVis}">
-                                                    <Border Visibility="{Binding OnPhoneTagVis}" Background="#1F0A84FF" CornerRadius="10" Padding="8,2" Margin="0,0,6,0">
-                                                        <TextBlock Text="在手机屏上" FontSize="13" Foreground="{StaticResource TintBlue}"/>
+                                                    <Border Visibility="{Binding OnPhoneTagVis}" Background="{DynamicResource PhoneTagOnBg}" CornerRadius="10" Padding="8,2" Margin="0,0,6,0">
+                                                        <TextBlock Text="在手机屏上" FontSize="13" Foreground="{DynamicResource PhoneTintBlue}"/>
                                                     </Border>
-                                                    <Border Visibility="{Binding MinimizedVis}" Background="#2C2C2E" CornerRadius="10" Padding="8,2">
-                                                        <TextBlock Text="已最小化" FontSize="13" Foreground="{StaticResource SecondaryText}"/>
+                                                    <Border Visibility="{Binding MinimizedVis}" Background="{DynamicResource PhoneTagMutedBg}" CornerRadius="10" Padding="8,2">
+                                                        <TextBlock Text="已最小化" FontSize="13" Foreground="{DynamicResource PhoneSecondaryText}"/>
                                                     </Border>
                                                 </StackPanel>
                                             </Grid>
@@ -149,15 +141,15 @@
                                             <Button Style="{StaticResource FlatBtn}" Width="48" Height="48"
                                                     Visibility="{Binding NormalCloseVis}"
                                                     Click="OnAskCloseWindow" Tag="{Binding}">
-                                                <Border Width="28" Height="28" CornerRadius="14" Background="#3A3A3C" HorizontalAlignment="Center" VerticalAlignment="Center">
-                                                    <TextBlock Text="×" FontSize="16" Foreground="#98989F" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0"/>
+                                                <Border Width="28" Height="28" CornerRadius="14" Background="{DynamicResource PhoneCloseBtnBg}" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                                    <TextBlock Text="×" FontSize="16" Foreground="{DynamicResource PhoneSecondaryText}" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0"/>
                                                 </Border>
                                             </Button>
 
                                             <StackPanel Orientation="Horizontal" Visibility="{Binding AskCloseVis}">
                                                 <Button Style="{StaticResource FlatBtn}" Margin="0,0,8,0" Click="OnCancelConfirm">
-                                                    <Border Height="38" CornerRadius="19" Background="{StaticResource PhoneBg}" Padding="14,0">
-                                                        <TextBlock Text="取消" FontSize="15" FontWeight="Medium" Foreground="White" VerticalAlignment="Center"/>
+                                                    <Border Height="38" CornerRadius="19" Background="{DynamicResource PhoneBg}" Padding="14,0">
+                                                        <TextBlock Text="取消" FontSize="15" FontWeight="Medium" Foreground="{DynamicResource PhoneTextPrimary}" VerticalAlignment="Center"/>
                                                     </Border>
                                                 </Button>
                                                 <Button Style="{StaticResource FlatBtn}" Click="OnConfirmCloseWindow" Tag="{Binding Window}">
@@ -167,7 +159,7 @@
                                                 </Button>
                                             </StackPanel>
 
-                                            <TextBlock Text="正在关闭" FontSize="14" Foreground="{StaticResource SecondaryText}"
+                                            <TextBlock Text="正在关闭" FontSize="14" Foreground="{DynamicResource PhoneSecondaryText}"
                                                        VerticalAlignment="Center" Visibility="{Binding ClosingVis}" Margin="8,0"/>
                                         </StackPanel>
                                     </Grid>
@@ -181,21 +173,21 @@
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Grid.Column="0" Orientation="Horizontal" Visibility="{Binding ZoomControlsVis}">
                                             <Button Style="{StaticResource FlatBtn}" IsEnabled="{Binding CanZoomOut}" Click="OnZoomOut">
-                                                <Border Width="48" Height="48" CornerRadius="24" Background="{StaticResource PhoneBg}">
-                                                    <TextBlock Text="A-" FontSize="16" FontWeight="SemiBold" Foreground="{StaticResource TintBlue}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                <Border Width="48" Height="48" CornerRadius="24" Background="{DynamicResource PhoneBg}">
+                                                    <TextBlock Text="A-" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource PhoneTintBlue}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                                 </Border>
                                             </Button>
-                                            <TextBlock Text="{Binding ZoomText}" FontSize="16" Foreground="{StaticResource SecondaryText}"
+                                            <TextBlock Text="{Binding ZoomText}" FontSize="16" Foreground="{DynamicResource PhoneSecondaryText}"
                                                        VerticalAlignment="Center" TextAlignment="Center" MinWidth="78" Margin="8,0"/>
                                             <Button Style="{StaticResource FlatBtn}" IsEnabled="{Binding CanZoomIn}" Click="OnZoomIn">
-                                                <Border Width="48" Height="48" CornerRadius="24" Background="{StaticResource PhoneBg}">
-                                                    <TextBlock Text="A+" FontSize="16" FontWeight="SemiBold" Foreground="{StaticResource TintBlue}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                <Border Width="48" Height="48" CornerRadius="24" Background="{DynamicResource PhoneBg}">
+                                                    <TextBlock Text="A+" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource PhoneTintBlue}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                                 </Border>
                                             </Button>
                                         </StackPanel>
                                         <Button Grid.Column="2" Style="{StaticResource FlatBtn}" Click="OnPutBack">
-                                            <Border Height="48" CornerRadius="24" Background="{StaticResource PhoneBg}" Padding="18,0">
-                                                <TextBlock Text="↩ 还原" FontSize="16" FontWeight="Medium" Foreground="White" VerticalAlignment="Center"/>
+                                            <Border Height="48" CornerRadius="24" Background="{DynamicResource PhoneBg}" Padding="18,0">
+                                                <TextBlock Text="↩ 还原" FontSize="16" FontWeight="Medium" Foreground="{DynamicResource PhoneTextPrimary}" VerticalAlignment="Center"/>
                                             </Border>
                                         </Button>
                                     </Grid>
@@ -208,7 +200,7 @@
         </DataTemplate>
     </Window.Resources>
 
-    <Grid x:Name="PhoneRootGrid" Background="{StaticResource PhoneBg}">
+    <Grid x:Name="PhoneRootGrid" Background="{DynamicResource PhoneBg}">
         <!-- HOME PAGE -->
         <Grid x:Name="HomePageView" Visibility="Visible">
             <Grid.RowDefinitions>
@@ -225,17 +217,17 @@
                 </Grid.ColumnDefinitions>
 
                 <Button x:Name="BackBtn" Grid.Column="0" Style="{StaticResource FlatBtn}" Visibility="Collapsed" Click="OnBackToPlaced">
-                    <Border Height="48" CornerRadius="24" Background="#240A84FF" Padding="14,0,18,0">
-                        <TextBlock x:Name="BackBtnLabel" Text="‹ 返回" FontSize="18" FontWeight="Medium" Foreground="{StaticResource TintBlue}" VerticalAlignment="Center"/>
+                    <Border Height="48" CornerRadius="24" Background="{DynamicResource PhoneBackPillBg}" Padding="14,0,18,0">
+                        <TextBlock x:Name="BackBtnLabel" Text="‹ 返回" FontSize="18" FontWeight="Medium" Foreground="{DynamicResource PhoneTintBlue}" VerticalAlignment="Center"/>
                     </Border>
                 </Button>
 
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                     <Button Style="{StaticResource FlatBtn}" Width="52" Height="52" Click="OnAskDismissScreen" ToolTip="退出手机屏">
-                        <TextBlock Text="⏏" FontSize="22" Foreground="{StaticResource TintBlue}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <TextBlock Text="⏏" FontSize="22" Foreground="{DynamicResource PhoneTintBlue}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Button>
                     <Button Style="{StaticResource FlatBtn}" Width="44" Height="52" Click="OnOpenModelsPage" ToolTip="手机型号">
-                        <TextBlock Text="📱" FontSize="20" Foreground="{StaticResource TintBlue}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <TextBlock Text="📱" FontSize="20" Foreground="{DynamicResource PhoneTintBlue}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Button>
                 </StackPanel>
             </Grid>
@@ -244,27 +236,27 @@
             <ScrollViewer x:Name="HomeScroll" Grid.Row="1" VerticalScrollBarVisibility="Hidden" PanningMode="VerticalOnly">
                 <StackPanel Margin="20,4,20,24">
                     <!-- Title -->
-                    <TextBlock Text="App" FontSize="38" FontWeight="Bold" Foreground="White" Margin="0,0,0,12"/>
+                    <TextBlock Text="App" FontSize="38" FontWeight="Bold" Foreground="{DynamicResource PhoneTextPrimary}" Margin="0,0,0,12"/>
 
                     <!-- Fake Search Bar Button -> Opens Search Page -->
                     <Button Style="{StaticResource FlatBtn}" HorizontalContentAlignment="Stretch" Click="OnOpenSearchPage" Margin="0,0,0,12">
-                        <Border Height="48" CornerRadius="12" Background="{StaticResource FillBg}" Padding="14,0">
+                        <Border Height="48" CornerRadius="12" Background="{DynamicResource PhoneFillBg}" Padding="14,0">
                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                <TextBlock Text="🔍" FontSize="16" Foreground="{StaticResource SecondaryText}" Margin="0,0,8,0" VerticalAlignment="Center"/>
-                                <TextBlock Text="搜索 App" FontSize="18" Foreground="{StaticResource SecondaryText}" VerticalAlignment="Center"/>
+                                <TextBlock Text="🔍" FontSize="16" Foreground="{DynamicResource PhoneSecondaryText}" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                                <TextBlock Text="搜索 App" FontSize="18" Foreground="{DynamicResource PhoneSecondaryText}" VerticalAlignment="Center"/>
                             </StackPanel>
                         </Border>
                     </Button>
 
                     <!-- Dismiss Confirmation Banner -->
-                    <Border x:Name="DismissBanner" Visibility="Collapsed" Background="{StaticResource CardBg}" CornerRadius="12" Padding="16" Margin="0,0,0,12">
+                    <Border x:Name="DismissBanner" Visibility="Collapsed" Background="{DynamicResource PhoneCardBg}" CornerRadius="12" Padding="16" Margin="0,0,0,12">
                         <StackPanel>
-                            <TextBlock Text="退出手机屏？" FontSize="18" FontWeight="SemiBold" Foreground="#FF453A"/>
-                            <TextBlock Text="窗口还原，下次远程时恢复" FontSize="16" Foreground="{StaticResource SecondaryText}" Margin="0,4,0,12"/>
+                            <TextBlock Text="退出手机屏？" FontSize="18" FontWeight="SemiBold" Foreground="{DynamicResource PhoneAlertRed}"/>
+                            <TextBlock Text="窗口还原，下次远程时恢复" FontSize="16" Foreground="{DynamicResource PhoneSecondaryText}" Margin="0,4,0,12"/>
                             <StackPanel Orientation="Horizontal">
                                 <Button Style="{StaticResource FlatBtn}" Margin="0,0,12,0" Click="OnCancelConfirm">
-                                    <Border Height="42" CornerRadius="21" Background="{StaticResource PhoneBg}" Padding="20,0">
-                                        <TextBlock Text="取消" FontSize="17" FontWeight="Medium" Foreground="White" VerticalAlignment="Center"/>
+                                    <Border Height="42" CornerRadius="21" Background="{DynamicResource PhoneBg}" Padding="20,0">
+                                        <TextBlock Text="取消" FontSize="17" FontWeight="Medium" Foreground="{DynamicResource PhoneTextPrimary}" VerticalAlignment="Center"/>
                                     </Border>
                                 </Button>
                                 <Button Style="{StaticResource FlatBtn}" Click="OnConfirmDismissScreen">
@@ -277,14 +269,14 @@
                     </Border>
 
                     <!-- Notice Banner -->
-                    <Border x:Name="NoticeBanner" Visibility="Collapsed" Background="{StaticResource CardBg}" CornerRadius="12" Padding="16" Margin="0,0,0,12">
+                    <Border x:Name="NoticeBanner" Visibility="Collapsed" Background="{DynamicResource PhoneCardBg}" CornerRadius="12" Padding="16" Margin="0,0,0,12">
                         <StackPanel>
-                            <TextBlock x:Name="NoticeHeadline" FontSize="18" FontWeight="SemiBold" Foreground="#FF9F0A" TextWrapping="Wrap"/>
-                            <TextBlock x:Name="NoticeDetail" FontSize="16" Foreground="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                            <TextBlock x:Name="NoticeHeadline" FontSize="18" FontWeight="SemiBold" Foreground="{DynamicResource PhoneAlertOrange}" TextWrapping="Wrap"/>
+                            <TextBlock x:Name="NoticeDetail" FontSize="16" Foreground="{DynamicResource PhoneSecondaryText}" TextWrapping="Wrap" Margin="0,4,0,0"/>
                             <StackPanel x:Name="NoticeActionsRow" Orientation="Horizontal" Visibility="Collapsed" Margin="0,12,0,0">
                                 <Button Style="{StaticResource FlatBtn}" Margin="0,0,12,0" Click="OnDismissNotice">
-                                    <Border Height="42" CornerRadius="21" Background="{StaticResource PhoneBg}" Padding="20,0">
-                                        <TextBlock Text="稍后" FontSize="17" FontWeight="Medium" Foreground="White" VerticalAlignment="Center"/>
+                                    <Border Height="42" CornerRadius="21" Background="{DynamicResource PhoneBg}" Padding="20,0">
+                                        <TextBlock Text="稍后" FontSize="17" FontWeight="Medium" Foreground="{DynamicResource PhoneTextPrimary}" VerticalAlignment="Center"/>
                                     </Border>
                                 </Button>
                                 <Button x:Name="ForceQuitNoticeBtn" Style="{StaticResource FlatBtn}" Click="OnForceQuitFromNotice">
@@ -294,28 +286,28 @@
                                 </Button>
                             </StackPanel>
                             <Button x:Name="NoticeCloseBtn" Style="{StaticResource FlatBtn}" HorizontalAlignment="Left" Margin="0,10,0,0" Click="OnDismissNotice">
-                                <Border Height="36" CornerRadius="18" Background="{StaticResource PhoneBg}" Padding="16,0">
-                                    <TextBlock Text="知道了" FontSize="15" Foreground="{StaticResource SecondaryText}" VerticalAlignment="Center"/>
+                                <Border Height="36" CornerRadius="18" Background="{DynamicResource PhoneBg}" Padding="16,0">
+                                    <TextBlock Text="知道了" FontSize="15" Foreground="{DynamicResource PhoneSecondaryText}" VerticalAlignment="Center"/>
                                 </Border>
                             </Button>
                         </StackPanel>
                     </Border>
 
                     <!-- Segmented Picker: 运行中 | 全部 -->
-                    <Border Background="{StaticResource FillBg}" CornerRadius="12" Padding="3" Margin="0,8,0,16">
+                    <Border Background="{DynamicResource PhoneFillBg}" CornerRadius="12" Padding="3" Margin="0,8,0,16">
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
                             <Button x:Name="RunningTabBtn" Grid.Column="0" Style="{StaticResource FlatBtn}" HorizontalContentAlignment="Stretch" Click="OnSelectRunningTab">
-                                <Border x:Name="RunningTabBd" Height="38" CornerRadius="9" Background="{StaticResource SegmentBg}">
-                                    <TextBlock x:Name="RunningTabText" Text="运行中" FontSize="15" FontWeight="SemiBold" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                <Border x:Name="RunningTabBd" Height="38" CornerRadius="9" Background="{DynamicResource PhoneSegmentBg}">
+                                    <TextBlock x:Name="RunningTabText" Text="运行中" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource PhoneTextPrimary}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                 </Border>
                             </Button>
                             <Button x:Name="AllTabBtn" Grid.Column="1" Style="{StaticResource FlatBtn}" HorizontalContentAlignment="Stretch" Click="OnSelectAllTab">
                                 <Border x:Name="AllTabBd" Height="38" CornerRadius="9" Background="Transparent">
-                                    <TextBlock x:Name="AllTabText" Text="全部" FontSize="15" FontWeight="Medium" Foreground="#EBEBF5" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    <TextBlock x:Name="AllTabText" Text="全部" FontSize="15" FontWeight="Medium" Foreground="{DynamicResource PhoneSegmentInactiveText}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                 </Border>
                             </Button>
                         </Grid>
@@ -324,21 +316,21 @@
                     <!-- RUNNING TAB -->
                     <StackPanel x:Name="RunningPagePanel" Visibility="Visible">
                         <StackPanel x:Name="CurrentAppSection" Visibility="Collapsed" Margin="0,0,0,20">
-                            <TextBlock Text="当前 App" FontSize="15" FontWeight="Medium" Foreground="{StaticResource SecondaryText}" Margin="4,0,0,8"/>
+                            <TextBlock Text="当前 App" FontSize="15" FontWeight="Medium" Foreground="{DynamicResource PhoneSecondaryText}" Margin="4,0,0,8"/>
                             <ContentControl x:Name="CurrentAppCardHost" ContentTemplate="{StaticResource AppCardTemplate}"/>
                         </StackPanel>
 
-                        <TextBlock x:Name="OtherAppsHeader" Text="其他 App" FontSize="15" FontWeight="Medium" Foreground="{StaticResource SecondaryText}" Margin="4,0,0,8" Visibility="Collapsed"/>
+                        <TextBlock x:Name="OtherAppsHeader" Text="其他 App" FontSize="15" FontWeight="Medium" Foreground="{DynamicResource PhoneSecondaryText}" Margin="4,0,0,8" Visibility="Collapsed"/>
                         <ItemsControl x:Name="RunningList" ItemTemplate="{StaticResource AppCardTemplate}"/>
 
                         <StackPanel x:Name="RunningEmptyState" Visibility="Collapsed" Margin="0,48,0,48" HorizontalAlignment="Center">
-                            <TextBlock x:Name="RunningEmptyText" Text="正在读取" FontSize="18" Foreground="{StaticResource SecondaryText}" HorizontalAlignment="Center"/>
+                            <TextBlock x:Name="RunningEmptyText" Text="正在读取" FontSize="18" Foreground="{DynamicResource PhoneSecondaryText}" HorizontalAlignment="Center"/>
                         </StackPanel>
                     </StackPanel>
 
                     <!-- ALL APPS TAB: 4-Column iOS Icon Grid -->
                     <StackPanel x:Name="AllAppsPanel" Visibility="Collapsed">
-                        <TextBlock x:Name="AllLoadingText" Text="正在读取" FontSize="18" Foreground="{StaticResource SecondaryText}" HorizontalAlignment="Center" Margin="0,48,0,48" Visibility="Collapsed"/>
+                        <TextBlock x:Name="AllLoadingText" Text="正在读取" FontSize="18" Foreground="{DynamicResource PhoneSecondaryText}" HorizontalAlignment="Center" Margin="0,48,0,48" Visibility="Collapsed"/>
                         <ItemsControl x:Name="AllAppsGrid">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate>
@@ -349,12 +341,12 @@
                                 <DataTemplate>
                                     <Button Style="{StaticResource FlatBtn}" IsEnabled="{Binding NotQuitting}" Click="OnOpenApp" Tag="{Binding App}" Margin="4,0,4,18">
                                         <StackPanel HorizontalAlignment="Center">
-                                            <Border CornerRadius="16" Background="#1C1C1E" Width="68" Height="68" Padding="10">
+                                            <Border CornerRadius="16" Background="{DynamicResource PhoneCardBg}" Width="68" Height="68" Padding="10">
                                                 <Image Source="{Binding Icon}" RenderOptions.BitmapScalingMode="HighQuality"/>
                                             </Border>
-                                            <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="Medium" Foreground="White"
+                                            <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="Medium" Foreground="{DynamicResource PhoneTextPrimary}"
                                                        TextTrimming="CharacterEllipsis" HorizontalAlignment="Center" Margin="0,8,0,4" MaxWidth="104"/>
-                                            <Ellipse Width="6" Height="6" Fill="#98989F" Opacity="{Binding RunningDotOpacity}" HorizontalAlignment="Center"/>
+                                            <Ellipse Width="6" Height="6" Fill="{DynamicResource PhoneSecondaryText}" Opacity="{Binding RunningDotOpacity}" HorizontalAlignment="Center"/>
                                         </StackPanel>
                                     </Button>
                                 </DataTemplate>
@@ -366,7 +358,7 @@
         </Grid>
 
         <!-- INLINE SEARCH PAGE -->
-        <Grid x:Name="SearchPageView" Visibility="Collapsed" Background="{StaticResource PhoneBg}">
+        <Grid x:Name="SearchPageView" Visibility="Collapsed" Background="{DynamicResource PhoneBg}">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
@@ -377,25 +369,25 @@
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <Border Grid.Column="0" Height="48" CornerRadius="12" Background="{StaticResource FillBg}" Padding="12,0">
+                <Border Grid.Column="0" Height="48" CornerRadius="12" Background="{DynamicResource PhoneFillBg}" Padding="12,0">
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="🔍" FontSize="16" Foreground="{StaticResource SecondaryText}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBlock Grid.Column="0" Text="🔍" FontSize="16" Foreground="{DynamicResource PhoneSecondaryText}" VerticalAlignment="Center" Margin="0,0,8,0"/>
                         <TextBox x:Name="SearchInputBox" Grid.Column="1" Background="Transparent" BorderThickness="0"
-                                 Foreground="White" CaretBrush="White" FontSize="18" VerticalContentAlignment="Center"
+                                 Foreground="{DynamicResource PhoneTextPrimary}" CaretBrush="{DynamicResource PhoneTextPrimary}" FontSize="18" VerticalContentAlignment="Center"
                                  TextChanged="OnSearchInputChanged"/>
                         <Button x:Name="ClearSearchBtn" Grid.Column="2" Style="{StaticResource FlatBtn}" Visibility="Collapsed"
                                 Width="32" Height="32" Click="OnClearSearch">
-                            <TextBlock Text="✕" FontSize="15" Foreground="{StaticResource SecondaryText}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            <TextBlock Text="✕" FontSize="15" Foreground="{DynamicResource PhoneSecondaryText}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Button>
                     </Grid>
                 </Border>
                 <Button Grid.Column="1" Style="{StaticResource FlatBtn}" Margin="12,0,0,0" Click="OnCloseSubPage">
-                    <TextBlock Text="取消" FontSize="18" Foreground="{StaticResource TintBlue}" VerticalAlignment="Center" Padding="4,10"/>
+                    <TextBlock Text="取消" FontSize="18" Foreground="{DynamicResource PhoneTintBlue}" VerticalAlignment="Center" Padding="4,10"/>
                 </Button>
             </Grid>
 
@@ -406,8 +398,8 @@
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
                                 <StackPanel Margin="0,0,0,12">
-                                    <TextBlock Text="{Binding Letter}" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource SecondaryText}" Margin="4,8,0,6"/>
-                                    <Border Background="{StaticResource CardBg}" CornerRadius="12">
+                                    <TextBlock Text="{Binding Letter}" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource PhoneSecondaryText}" Margin="4,8,0,6"/>
+                                    <Border Background="{DynamicResource PhoneCardBg}" CornerRadius="12">
                                         <ItemsControl ItemsSource="{Binding Apps}">
                                             <ItemsControl.ItemTemplate>
                                                 <DataTemplate>
@@ -420,8 +412,8 @@
                                                             </Grid.ColumnDefinitions>
                                                             <Image Grid.Column="0" Source="{Binding Icon}" Width="44" Height="44" RenderOptions.BitmapScalingMode="HighQuality"/>
                                                             <StackPanel Grid.Column="1" Margin="14,0,0,0" VerticalAlignment="Center">
-                                                                <TextBlock Text="{Binding Name}" FontSize="19" FontWeight="SemiBold" Foreground="White" TextTrimming="CharacterEllipsis"/>
-                                                                <TextBlock Text="{Binding Subtitle}" FontSize="15" Foreground="{StaticResource SecondaryText}" TextTrimming="CharacterEllipsis"/>
+                                                                <TextBlock Text="{Binding Name}" FontSize="19" FontWeight="SemiBold" Foreground="{DynamicResource PhoneTextPrimary}" TextTrimming="CharacterEllipsis"/>
+                                                                <TextBlock Text="{Binding Subtitle}" FontSize="15" Foreground="{DynamicResource PhoneSecondaryText}" TextTrimming="CharacterEllipsis"/>
                                                             </StackPanel>
                                                         </Grid>
                                                     </Button>
@@ -436,12 +428,12 @@
 
                     <!-- Search Matches -->
                     <StackPanel x:Name="SearchResultsPanel" Visibility="Collapsed">
-                        <TextBlock x:Name="SearchNoResultText" Text="无结果" FontSize="18" Foreground="{StaticResource SecondaryText}"
+                        <TextBlock x:Name="SearchNoResultText" Text="无结果" FontSize="18" Foreground="{DynamicResource PhoneSecondaryText}"
                                    HorizontalAlignment="Center" Margin="0,48,0,48" Visibility="Collapsed"/>
 
                         <StackPanel x:Name="SearchAppsSection" Visibility="Collapsed" Margin="0,0,0,20">
-                            <TextBlock Text="App" FontSize="15" FontWeight="Medium" Foreground="{StaticResource SecondaryText}" Margin="4,0,0,8"/>
-                            <Border Background="{StaticResource CardBg}" CornerRadius="12">
+                            <TextBlock Text="App" FontSize="15" FontWeight="Medium" Foreground="{DynamicResource PhoneSecondaryText}" Margin="4,0,0,8"/>
+                            <Border Background="{DynamicResource PhoneCardBg}" CornerRadius="12">
                                 <ItemsControl x:Name="SearchAppsResults">
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
@@ -454,8 +446,8 @@
                                                     </Grid.ColumnDefinitions>
                                                     <Image Grid.Column="0" Source="{Binding Icon}" Width="44" Height="44" RenderOptions.BitmapScalingMode="HighQuality"/>
                                                     <StackPanel Grid.Column="1" Margin="14,0,0,0" VerticalAlignment="Center">
-                                                        <TextBlock Text="{Binding Name}" FontSize="19" FontWeight="SemiBold" Foreground="White" TextTrimming="CharacterEllipsis"/>
-                                                        <TextBlock Text="{Binding Subtitle}" FontSize="15" Foreground="{StaticResource SecondaryText}" TextTrimming="CharacterEllipsis"/>
+                                                        <TextBlock Text="{Binding Name}" FontSize="19" FontWeight="SemiBold" Foreground="{DynamicResource PhoneTextPrimary}" TextTrimming="CharacterEllipsis"/>
+                                                        <TextBlock Text="{Binding Subtitle}" FontSize="15" Foreground="{DynamicResource PhoneSecondaryText}" TextTrimming="CharacterEllipsis"/>
                                                     </StackPanel>
                                                 </Grid>
                                             </Button>
@@ -466,8 +458,8 @@
                         </StackPanel>
 
                         <StackPanel x:Name="SearchWindowsSection" Visibility="Collapsed">
-                            <TextBlock Text="窗口" FontSize="15" FontWeight="Medium" Foreground="{StaticResource SecondaryText}" Margin="4,0,0,8"/>
-                            <Border Background="{StaticResource CardBg}" CornerRadius="12">
+                            <TextBlock Text="窗口" FontSize="15" FontWeight="Medium" Foreground="{DynamicResource PhoneSecondaryText}" Margin="4,0,0,8"/>
+                            <Border Background="{DynamicResource PhoneCardBg}" CornerRadius="12">
                                 <ItemsControl x:Name="SearchWindowsResults">
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
@@ -480,8 +472,8 @@
                                                     </Grid.ColumnDefinitions>
                                                     <Image Grid.Column="0" Source="{Binding Icon}" Width="44" Height="44" RenderOptions.BitmapScalingMode="HighQuality"/>
                                                     <StackPanel Grid.Column="1" Margin="14,0,0,0" VerticalAlignment="Center">
-                                                        <TextBlock Text="{Binding Title}" FontSize="19" FontWeight="SemiBold" Foreground="White" TextTrimming="CharacterEllipsis"/>
-                                                        <TextBlock Text="{Binding AppName}" FontSize="15" Foreground="{StaticResource SecondaryText}" TextTrimming="CharacterEllipsis"/>
+                                                        <TextBlock Text="{Binding Title}" FontSize="19" FontWeight="SemiBold" Foreground="{DynamicResource PhoneTextPrimary}" TextTrimming="CharacterEllipsis"/>
+                                                        <TextBlock Text="{Binding AppName}" FontSize="15" Foreground="{DynamicResource PhoneSecondaryText}" TextTrimming="CharacterEllipsis"/>
                                                     </StackPanel>
                                                 </Grid>
                                             </Button>
@@ -496,49 +488,49 @@
         </Grid>
 
         <!-- INLINE PHONE MODEL PAGE -->
-        <Grid x:Name="ModelPageView" Visibility="Collapsed" Background="{StaticResource PhoneBg}">
+        <Grid x:Name="ModelPageView" Visibility="Collapsed" Background="{DynamicResource PhoneBg}">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
 
             <Grid Grid.Row="0" Height="56" Margin="20,12,20,0">
-                <TextBlock Text="手机型号" FontSize="20" FontWeight="SemiBold" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                <TextBlock Text="手机型号" FontSize="20" FontWeight="SemiBold" Foreground="{DynamicResource PhoneTextPrimary}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                 <Button Style="{StaticResource FlatBtn}" HorizontalAlignment="Right" Click="OnCloseSubPage">
-                    <TextBlock Text="完成" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource TintBlue}" VerticalAlignment="Center" Padding="8,10"/>
+                    <TextBlock Text="完成" FontSize="18" FontWeight="SemiBold" Foreground="{DynamicResource PhoneTintBlue}" VerticalAlignment="Center" Padding="8,10"/>
                 </Button>
             </Grid>
 
             <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Hidden" PanningMode="VerticalOnly">
                 <StackPanel Margin="20,8,20,24">
-                    <Border Height="48" CornerRadius="12" Background="{StaticResource FillBg}" Padding="12,0" Margin="0,0,0,20">
+                    <Border Height="48" CornerRadius="12" Background="{DynamicResource PhoneFillBg}" Padding="12,0" Margin="0,0,0,20">
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="🔍" FontSize="16" Foreground="{StaticResource SecondaryText}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <TextBlock Grid.Column="0" Text="🔍" FontSize="16" Foreground="{DynamicResource PhoneSecondaryText}" VerticalAlignment="Center" Margin="0,0,8,0"/>
                             <TextBox x:Name="ModelSearchBox" Grid.Column="1" Background="Transparent" BorderThickness="0"
-                                     Foreground="White" CaretBrush="White" FontSize="18" VerticalContentAlignment="Center"
+                                     Foreground="{DynamicResource PhoneTextPrimary}" CaretBrush="{DynamicResource PhoneTextPrimary}" FontSize="18" VerticalContentAlignment="Center"
                                      TextChanged="OnModelSearchChanged"/>
                         </Grid>
                     </Border>
 
                     <!-- Current -->
                     <StackPanel x:Name="CurrentModelSection" Margin="0,0,0,20">
-                        <TextBlock Text="当前 · 手机屏按它调整比例" FontSize="15" FontWeight="Medium" Foreground="{StaticResource SecondaryText}" Margin="4,0,0,8"/>
-                        <Border Background="{StaticResource CardBg}" CornerRadius="12" Padding="16">
+                        <TextBlock Text="当前 · 手机屏按它调整比例" FontSize="15" FontWeight="Medium" Foreground="{DynamicResource PhoneSecondaryText}" Margin="4,0,0,8"/>
+                        <Border Background="{DynamicResource PhoneCardBg}" CornerRadius="12" Padding="16">
                             <StackPanel>
-                                <TextBlock x:Name="CurrentModelTitle" FontSize="20" FontWeight="SemiBold" Foreground="White"/>
-                                <TextBlock x:Name="CurrentModelSize" FontSize="16" Foreground="{StaticResource SecondaryText}" Margin="0,4,0,0"/>
+                                <TextBlock x:Name="CurrentModelTitle" FontSize="20" FontWeight="SemiBold" Foreground="{DynamicResource PhoneTextPrimary}"/>
+                                <TextBlock x:Name="CurrentModelSize" FontSize="16" Foreground="{DynamicResource PhoneSecondaryText}" Margin="0,4,0,0"/>
                             </StackPanel>
                         </Border>
                     </StackPanel>
 
                     <!-- Custom -->
                     <StackPanel x:Name="CustomModelSection" Margin="0,0,0,20">
-                        <TextBlock Text="自定义" FontSize="15" FontWeight="Medium" Foreground="{StaticResource SecondaryText}" Margin="4,0,0,8"/>
-                        <Border Background="{StaticResource CardBg}" CornerRadius="12" Padding="16">
+                        <TextBlock Text="自定义" FontSize="15" FontWeight="Medium" Foreground="{DynamicResource PhoneSecondaryText}" Margin="4,0,0,8"/>
+                        <Border Background="{DynamicResource PhoneCardBg}" CornerRadius="12" Padding="16">
                             <StackPanel>
                                 <Grid>
                                     <Grid.ColumnDefinitions>
@@ -547,22 +539,22 @@
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
-                                    <Border Grid.Column="0" Height="44" CornerRadius="10" Background="{StaticResource FillBg}">
-                                        <TextBox x:Name="CustomWidthBox" Background="Transparent" BorderThickness="0" Foreground="White" CaretBrush="White"
+                                    <Border Grid.Column="0" Height="44" CornerRadius="10" Background="{DynamicResource PhoneFillBg}">
+                                        <TextBox x:Name="CustomWidthBox" Background="Transparent" BorderThickness="0" Foreground="{DynamicResource PhoneTextPrimary}" CaretBrush="{DynamicResource PhoneTextPrimary}"
                                                  FontSize="17" TextAlignment="Center" VerticalContentAlignment="Center"/>
                                     </Border>
-                                    <TextBlock Grid.Column="1" Text="×" FontSize="18" Foreground="{StaticResource SecondaryText}" VerticalAlignment="Center" Margin="10,0"/>
-                                    <Border Grid.Column="2" Height="44" CornerRadius="10" Background="{StaticResource FillBg}">
-                                        <TextBox x:Name="CustomHeightBox" Background="Transparent" BorderThickness="0" Foreground="White" CaretBrush="White"
+                                    <TextBlock Grid.Column="1" Text="×" FontSize="18" Foreground="{DynamicResource PhoneSecondaryText}" VerticalAlignment="Center" Margin="10,0"/>
+                                    <Border Grid.Column="2" Height="44" CornerRadius="10" Background="{DynamicResource PhoneFillBg}">
+                                        <TextBox x:Name="CustomHeightBox" Background="Transparent" BorderThickness="0" Foreground="{DynamicResource PhoneTextPrimary}" CaretBrush="{DynamicResource PhoneTextPrimary}"
                                                  FontSize="17" TextAlignment="Center" VerticalContentAlignment="Center"/>
                                     </Border>
                                     <Button Grid.Column="3" Style="{StaticResource FlatBtn}" Margin="12,0,0,0" Click="OnApplyCustomModel">
-                                        <Border Height="44" CornerRadius="22" Background="{StaticResource PhoneBg}" Padding="18,0">
-                                            <TextBlock Text="使用" FontSize="17" FontWeight="Medium" Foreground="{StaticResource TintBlue}" VerticalAlignment="Center"/>
+                                        <Border Height="44" CornerRadius="22" Background="{DynamicResource PhoneBg}" Padding="18,0">
+                                            <TextBlock Text="使用" FontSize="17" FontWeight="Medium" Foreground="{DynamicResource PhoneTintBlue}" VerticalAlignment="Center"/>
                                         </Border>
                                     </Button>
                                 </Grid>
-                                <TextBlock Text="屏幕分辨率或比例，如 1080 × 2400、9 × 20" FontSize="14" Foreground="{StaticResource SecondaryText}" Margin="0,10,0,0"/>
+                                <TextBlock Text="屏幕分辨率或比例，如 1080 × 2400、9 × 20" FontSize="14" Foreground="{DynamicResource PhoneSecondaryText}" Margin="0,10,0,0"/>
                             </StackPanel>
                         </Border>
                     </StackPanel>
@@ -572,8 +564,8 @@
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
                                 <StackPanel Margin="0,0,0,20">
-                                    <TextBlock Text="{Binding Name}" FontSize="15" FontWeight="Medium" Foreground="{StaticResource SecondaryText}" Margin="4,0,0,8"/>
-                                    <Border Background="{StaticResource CardBg}" CornerRadius="12">
+                                    <TextBlock Text="{Binding Name}" FontSize="15" FontWeight="Medium" Foreground="{DynamicResource PhoneSecondaryText}" Margin="4,0,0,8"/>
+                                    <Border Background="{DynamicResource PhoneCardBg}" CornerRadius="12">
                                         <ItemsControl ItemsSource="{Binding Models}">
                                             <ItemsControl.ItemTemplate>
                                                 <DataTemplate>
@@ -584,10 +576,10 @@
                                                                 <ColumnDefinition Width="Auto"/>
                                                             </Grid.ColumnDefinitions>
                                                             <StackPanel Grid.Column="0">
-                                                                <TextBlock Text="{Binding Name}" FontSize="18" Foreground="White" TextTrimming="CharacterEllipsis"/>
-                                                                <TextBlock Text="{Binding SizeText}" FontSize="14" Foreground="{StaticResource SecondaryText}" Margin="0,3,0,0"/>
+                                                                <TextBlock Text="{Binding Name}" FontSize="18" Foreground="{DynamicResource PhoneTextPrimary}" TextTrimming="CharacterEllipsis"/>
+                                                                <TextBlock Text="{Binding SizeText}" FontSize="14" Foreground="{DynamicResource PhoneSecondaryText}" Margin="0,3,0,0"/>
                                                             </StackPanel>
-                                                            <TextBlock Grid.Column="1" Text="✓" FontSize="18" FontWeight="Bold" Foreground="{StaticResource TintBlue}"
+                                                            <TextBlock Grid.Column="1" Text="✓" FontSize="18" FontWeight="Bold" Foreground="{DynamicResource PhoneTintBlue}"
                                                                        VerticalAlignment="Center" Visibility="{Binding CheckVis}"/>
                                                         </Grid>
                                                     </Button>
@@ -604,14 +596,14 @@
         </Grid>
 
         <!-- FULL-SCREEN BUSY VIEW (opening / placing / reshaping / dismissing) -->
-        <Grid x:Name="BusyOverlay" Visibility="Collapsed" Background="{StaticResource PhoneBg}">
+        <Grid x:Name="BusyOverlay" Visibility="Collapsed" Background="{DynamicResource PhoneBg}">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Margin="32">
-                <Border CornerRadius="20" Background="#1C1C1E" Width="96" Height="96" Padding="14" HorizontalAlignment="Center">
+                <Border CornerRadius="20" Background="{DynamicResource PhoneCardBg}" Width="96" Height="96" Padding="14" HorizontalAlignment="Center">
                     <Image x:Name="BusyIcon" RenderOptions.BitmapScalingMode="HighQuality"/>
                 </Border>
-                <TextBlock x:Name="BusyTitle" FontSize="22" FontWeight="SemiBold" Foreground="White" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="0,16,0,4"/>
-                <TextBlock x:Name="BusySubtitle" FontSize="17" Foreground="{StaticResource SecondaryText}" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" Visibility="Collapsed"/>
-                <TextBlock x:Name="BusyStatus" FontSize="15" Foreground="{StaticResource SecondaryText}" HorizontalAlignment="Center" Margin="0,24,0,0"/>
+                <TextBlock x:Name="BusyTitle" FontSize="22" FontWeight="SemiBold" Foreground="{DynamicResource PhoneTextPrimary}" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="0,16,0,4"/>
+                <TextBlock x:Name="BusySubtitle" FontSize="17" Foreground="{DynamicResource PhoneSecondaryText}" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" Visibility="Collapsed"/>
+                <TextBlock x:Name="BusyStatus" FontSize="15" Foreground="{DynamicResource PhoneSecondaryText}" HorizontalAlignment="Center" Margin="0,24,0,0"/>
             </StackPanel>
         </Grid>
     </Grid>

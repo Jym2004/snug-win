@@ -195,6 +195,18 @@ public sealed class ExpandedCoreTests
     }
 
     [Theory]
+    [InlineData("{}", AppThemeMode.Light)]
+    [InlineData("{\"theme\":\"Dark\"}", AppThemeMode.Dark)]
+    [InlineData("{\"theme\":\"Auto\"}", AppThemeMode.Auto)]
+    [InlineData("{\"theme\":1}", AppThemeMode.Dark)]
+    [InlineData("{\"theme\":99}", AppThemeMode.Light)]
+    public void AppConfig_ThemeDefaultsToLightAndSanitizes(string json, AppThemeMode expected)
+    {
+        var cfg = AppConfig.FromJsonOrDefault(json);
+        Assert.Equal(expected, cfg.Theme);
+    }
+
+    [Theory]
     [InlineData(1.0, 9.9, false)]
     [InlineData(1.0, 10.1, true)]
     [InlineData(2.0, 19.9, false)]

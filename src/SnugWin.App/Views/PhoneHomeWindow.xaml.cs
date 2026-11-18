@@ -18,9 +18,6 @@ public partial class PhoneHomeWindow : Window
 
     public sealed class RunningAppVm
     {
-        private static readonly Brush SecondaryBrush = new SolidColorBrush(Color.FromRgb(0x98, 0x98, 0x9F));
-        private static readonly Brush RedBrush = new SolidColorBrush(Color.FromRgb(0xFF, 0x45, 0x3A));
-
         public RunningApp App { get; }
         public string AppName => App.App.Name;
         public ImageSource Icon { get; }
@@ -48,20 +45,23 @@ public partial class PhoneHomeWindow : Window
             AskQuitVis = !quitting && askQuit ? Visibility.Visible : Visibility.Collapsed;
             NormalActionsVis = !quitting && !askQuit ? Visibility.Visible : Visibility.Collapsed;
 
+            var secondaryBrush = ResolveThemeBrush("PhoneSecondaryText", Color.FromRgb(0x6B, 0x72, 0x80));
+            var redBrush = ResolveThemeBrush("PhoneAlertRed", Color.FromRgb(0xDC, 0x26, 0x26));
+
             if (askQuit)
             {
                 Subtitle = $"退出 {AppName}？";
-                SubtitleBrush = RedBrush;
+                SubtitleBrush = redBrush;
             }
             else if (quitting)
             {
                 Subtitle = "正在退出";
-                SubtitleBrush = SecondaryBrush;
+                SubtitleBrush = secondaryBrush;
             }
             else
             {
                 Subtitle = app.Windows.Count == 0 ? "没有窗口" : $"{app.Windows.Count} 个窗口";
-                SubtitleBrush = SecondaryBrush;
+                SubtitleBrush = secondaryBrush;
             }
 
             Windows = app.Windows
@@ -72,16 +72,11 @@ public partial class PhoneHomeWindow : Window
 
     public sealed class WindowVm
     {
-        private static readonly Brush WhiteBrush = Brushes.White;
-        private static readonly Brush TintBrush = new SolidColorBrush(Color.FromRgb(0x0A, 0x84, 0xFF));
-        private static readonly Brush SecondaryBrush = new SolidColorBrush(Color.FromRgb(0x98, 0x98, 0x9F));
-        private static readonly Brush RedBrush = new SolidColorBrush(Color.FromRgb(0xFF, 0x45, 0x3A));
-
         public WindowInfo Window { get; }
         public bool OnPhone { get; }
         public string DisplayTitle { get; }
         public string RowSymbol => OnPhone ? "📱" : "❐";
-        public Brush RowSymbolBrush => OnPhone ? TintBrush : SecondaryBrush;
+        public Brush RowSymbolBrush { get; }
         public Brush TitleBrush { get; }
         public bool NotClosing { get; }
         public Visibility TagsVis { get; }
@@ -98,12 +93,18 @@ public partial class PhoneHomeWindow : Window
 
         public WindowVm(WindowInfo window, PhoneDeskState state, bool askClose)
         {
+            var primaryBrush = ResolveThemeBrush("PhoneTextPrimary", Color.FromRgb(0x11, 0x18, 0x27));
+            var tintBrush = ResolveThemeBrush("PhoneTintBlue", Color.FromRgb(0x00, 0x7A, 0xFF));
+            var secondaryBrush = ResolveThemeBrush("PhoneSecondaryText", Color.FromRgb(0x6B, 0x72, 0x80));
+            var redBrush = ResolveThemeBrush("PhoneAlertRed", Color.FromRgb(0xDC, 0x26, 0x26));
+
             Window = window;
             OnPhone = state.Placed?.Window.Key == window.Key;
             bool closing = state.Closing.Contains(window.Key);
             NotClosing = !closing;
+            RowSymbolBrush = OnPhone ? tintBrush : secondaryBrush;
             DisplayTitle = askClose ? "关闭此窗口？" : (string.IsNullOrEmpty(window.Title) ? "无标题" : window.Title);
-            TitleBrush = askClose ? RedBrush : WhiteBrush;
+            TitleBrush = askClose ? redBrush : primaryBrush;
 
             TagsVis = askClose ? Visibility.Collapsed : Visibility.Visible;
             OnPhoneTagVis = OnPhone ? Visibility.Visible : Visibility.Collapsed;
@@ -161,6 +162,7 @@ public partial class PhoneHomeWindow : Window
     private readonly AppController _controller;
     private readonly bool _previewMode;
     private readonly Action _uiChangedHandler;
+    private readonly Action<bool> _themeHandler;
     private SubPage _subPage = SubPage.None;
     private bool _showAllTab;
     private bool _confirmDismiss;
@@ -171,7 +173,6 @@ public partial class PhoneHomeWindow : Window
     private DeskWorkKind? _lastWorkKind;
     private string? _lastRunningSig;
     private string? _lastAllSig;
-    private static readonly Brush SegmentActiveBrush = CreateFrozenBrush(0x63, 0x63, 0x66);
 
     public bool AcceptsKeys => _subPage != SubPage.None;
 
@@ -188,12 +189,35 @@ public partial class PhoneHomeWindow : Window
             Topmost = false;
             SizeToContent = SizeToContent.WidthAndHeight;
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
-            WindowPlacementHelper.ApplyModernDarkChrome(this);
+            WindowPlacementHelper.ApplyWindowChromeTheme(this, _controller.IsEffectiveDarkTheme);
         }
         _uiChangedHandler = () => Dispatcher.BeginInvoke(SyncState);
+        _themeHandler = isDark => Dispatcher.BeginInvoke(() =>
+        {
+            if (_previewMode)
+                WindowPlacementHelper.ApplyWindowChromeTheme(this, isDark);
+            _lastRunningSig = null;
+            _lastAllSig = null;
+            UpdateTabStyles();
+            SyncState();
+        });
         _controller.UiStateChanged += _uiChangedHandler;
-        Closed += (_, _) => _controller.UiStateChanged -= _uiChangedHandler;
+        _controller.ThemeChanged += _themeHandler;
+        Closed += (_, _) =>
+        {
+            _controller.UiStateChanged -= _uiChangedHandler;
+            _controller.ThemeChanged -= _themeHandler;
+        };
         UpdateTabStyles();
+    }
+
+    private static Brush ResolveThemeBrush(string key, Color fallback)
+    {
+        if (System.Windows.Application.Current?.TryFindResource(key) is Brush b)
+            return b;
+        var created = new SolidColorBrush(fallback);
+        created.Freeze();
+        return created;
     }
 
     public void ApplyPreviewLayout(SizeD workAreaDip, ScreenFit fit, PhoneChoice phone)
@@ -490,13 +514,6 @@ public partial class PhoneHomeWindow : Window
         return sb.ToString();
     }
 
-    private static Brush CreateFrozenBrush(byte r, byte g, byte b)
-    {
-        var brush = new SolidColorBrush(Color.FromRgb(r, g, b));
-        brush.Freeze();
-        return brush;
-    }
-
     private static RunningApp BuildPlacedApp(WindowInfo placedWindow, IReadOnlyList<RunningApp> running)
     {
         var found = running.FirstOrDefault(r => r.Pid == placedWindow.Key.Pid)
@@ -587,8 +604,13 @@ public partial class PhoneHomeWindow : Window
 
     private void UpdateTabStyles()
     {
-        RunningTabBd.Background = !_showAllTab ? SegmentActiveBrush : Brushes.Transparent;
-        AllTabBd.Background = _showAllTab ? SegmentActiveBrush : Brushes.Transparent;
+        var activeBrush = ResolveThemeBrush("PhoneSegmentBg", Color.FromRgb(0xFF, 0xFF, 0xFF));
+        var activeText = ResolveThemeBrush("PhoneTextPrimary", Color.FromRgb(0x11, 0x18, 0x27));
+        var inactiveText = ResolveThemeBrush("PhoneSegmentInactiveText", Color.FromRgb(0x4B, 0x55, 0x63));
+        RunningTabBd.Background = !_showAllTab ? activeBrush : Brushes.Transparent;
+        AllTabBd.Background = _showAllTab ? activeBrush : Brushes.Transparent;
+        RunningTabText.Foreground = !_showAllTab ? activeText : inactiveText;
+        AllTabText.Foreground = _showAllTab ? activeText : inactiveText;
         RunningPagePanel.Visibility = !_showAllTab ? Visibility.Visible : Visibility.Collapsed;
         AllAppsPanel.Visibility = _showAllTab ? Visibility.Visible : Visibility.Collapsed;
     }

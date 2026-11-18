@@ -9,9 +9,17 @@ namespace SnugWin.App.Views;
 
 internal static class WindowPlacementHelper
 {
+    private const uint SWP_NOSIZE = 0x0001;
+    private const uint SWP_NOMOVE = 0x0002;
+    private const uint SWP_NOZORDER = 0x0004;
     private const uint SWP_NOACTIVATE = 0x0010;
+    private const uint SWP_FRAMECHANGED = 0x0020;
     private const uint SWP_SHOWWINDOW = 0x0040;
+    private const int GWL_STYLE = -16;
     private const int GWL_EXSTYLE = -20;
+    private const long WS_MINIMIZEBOX = 0x00020000L;
+    private const long WS_MAXIMIZEBOX = 0x00010000L;
+    private const long WS_SYSMENU = 0x00080000L;
     private const long WS_EX_TRANSPARENT = 0x00000020L;
     private const long WS_EX_NOACTIVATE = 0x08000000L;
     private const long WS_EX_TOOLWINDOW = 0x00000080L;
@@ -90,12 +98,37 @@ internal static class WindowPlacementHelper
             SetForegroundWindow(hwnd);
     }
 
-    public static void ApplyModernDarkChrome(Window window)
+    public static void ApplyModernDarkChrome(Window window) =>
+        ApplyWindowChromeTheme(window, isDark: true);
+
+    public static void ApplyWindowChromeTheme(Window window, bool isDark)
     {
-        ApplyMicaBackdrop(window, backdropType: Win32.DWMSBT_TABBEDWINDOW);
+        try
+        {
+            window.Icon = System.Windows.Media.Imaging.BitmapFrame.Create(
+                new Uri("pack://application:,,,/Assets/snugwin.ico"));
+        }
+        catch
+        {
+        }
+
+        void Apply()
+        {
+            var hwnd = new WindowInteropHelper(window).Handle;
+            if (hwnd == IntPtr.Zero) return;
+            int dark = isDark ? 1 : 0;
+            _ = Win32.DwmSetWindowAttribute(hwnd, Win32.DWMWA_USE_IMMERSIVE_DARK_MODE, ref dark, sizeof(int));
+            int round = 2; // DWMWCP_ROUND
+            _ = Win32.DwmSetWindowAttribute(hwnd, Win32.DWMWA_WINDOW_CORNER_PREFERENCE, ref round, sizeof(int));
+        }
+
+        if (new WindowInteropHelper(window).Handle != IntPtr.Zero)
+            Apply();
+        else
+            window.SourceInitialized += (_, _) => Apply();
     }
 
-    public static void ApplyMicaBackdrop(Window window, int backdropType = Win32.DWMSBT_TABBEDWINDOW)
+    public static void ApplyMicaBackdrop(Window window, bool isDark, int backdropType = Win32.DWMSBT_TABBEDWINDOW)
     {
         try
         {
@@ -111,7 +144,19 @@ internal static class WindowPlacementHelper
             var hwnd = new WindowInteropHelper(window).Handle;
             if (hwnd == IntPtr.Zero) return;
 
-            int dark = 1;
+            // Remove WS_SYSMENU / WS_MINIMIZEBOX / WS_MAXIMIZEBOX so DWM never paints native
+            // min/max/close glyphs over our custom titlebar chrome buttons, while preserving
+            // WS_CAPTION | WS_THICKFRAME for Win11 Mica, rounded corners & snap resize.
+            long style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+            long cleaned = style & ~(WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX);
+            if (cleaned != style)
+            {
+                SetWindowLongPtrW(hwnd, GWL_STYLE, cleaned);
+                SetWindowPos(hwnd, IntPtr.Zero, 0, 0, 0, 0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+            }
+
+            int dark = isDark ? 1 : 0;
             _ = Win32.DwmSetWindowAttribute(hwnd, Win32.DWMWA_USE_IMMERSIVE_DARK_MODE, ref dark, sizeof(int));
             int round = 2; // DWMWCP_ROUND
             _ = Win32.DwmSetWindowAttribute(hwnd, Win32.DWMWA_WINDOW_CORNER_PREFERENCE, ref round, sizeof(int));
@@ -138,9 +183,10 @@ internal static class WindowPlacementHelper
                 }
             }
 
-            // Fallback solid charcoal on Windows 10 / environments where DWM Mica is unavailable
             window.Background = new System.Windows.Media.SolidColorBrush(
-                System.Windows.Media.Color.FromRgb(0x14, 0x17, 0x1F));
+                isDark
+                    ? System.Windows.Media.Color.FromRgb(0x14, 0x17, 0x1F)
+                    : System.Windows.Media.Color.FromRgb(0xF2, 0xF4, 0xF8));
         }
 
         if (new WindowInteropHelper(window).Handle != IntPtr.Zero)

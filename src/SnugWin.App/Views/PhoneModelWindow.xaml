@@ -9,7 +9,7 @@
         WindowStyle="SingleBorderWindow"
         FontFamily="{StaticResource AppFont}"
         Background="Transparent"
-        Foreground="{StaticResource TextPrimary}">
+        Foreground="{DynamicResource TextPrimary}">
     <shell:WindowChrome.WindowChrome>
         <shell:WindowChrome CaptionHeight="44"
                             CornerRadius="12"
@@ -31,7 +31,7 @@
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
             <TextBlock Grid.Column="0" Text="选择手机型号与比例" FontSize="13.5" FontWeight="SemiBold"
-                       Foreground="{StaticResource TextPrimary}" VerticalAlignment="Center"/>
+                       Foreground="{DynamicResource TextPrimary}" VerticalAlignment="Center"/>
             <Button Grid.Column="1" Style="{StaticResource ChromeIconButton}" Click="OnCloseClick" ToolTip="关闭"
                     shell:WindowChrome.IsHitTestVisibleInChrome="True">
                 <Path Data="M3,3 L11,11 M11,3 L3,11" Width="10" Height="10" Stretch="Uniform"
@@ -55,22 +55,22 @@
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
-                    <Border Grid.Column="0" Background="{StaticResource AccentSoftBg}" BorderBrush="{StaticResource AccentSoftBorder}"
+                    <Border Grid.Column="0" Background="{DynamicResource AccentSoftBg}" BorderBrush="{DynamicResource AccentSoftBorder}"
                             BorderThickness="1" CornerRadius="6" Padding="8,3" VerticalAlignment="Center" Margin="0,0,10,0">
-                        <TextBlock Text="当前生效" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource AccentSoftText}"/>
+                        <TextBlock Text="当前生效" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource AccentSoftText}"/>
                     </Border>
                     <TextBlock x:Name="CurrentLabel" Grid.Column="1" FontSize="14.5" FontWeight="SemiBold"
-                               Foreground="{StaticResource TextPrimary}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                               Foreground="{DynamicResource TextPrimary}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                 </Grid>
 
-                <Border Background="{StaticResource BgCard}" BorderBrush="{StaticResource BorderSubtle}" BorderThickness="1" CornerRadius="14" Padding="14,12">
+                <Border Background="{DynamicResource BgCard}" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1" CornerRadius="14" Padding="14,12">
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
                         <TextBlock Grid.Row="0" Text="自定义竖屏分辨率 / 比例（例如 1080 × 2400 或 9 × 20）"
-                                   FontSize="11.5" Foreground="{StaticResource TextSecondary}" Margin="0,0,0,9"/>
+                                   FontSize="11.5" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,9"/>
                         <Grid Grid.Row="1">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
@@ -82,7 +82,7 @@
                             <Grid Grid.Column="0" Height="34">
                                 <TextBox x:Name="CustomWidthBox" Style="{StaticResource DarkTextBox}" Padding="10,0"
                                          VerticalContentAlignment="Center" FontFamily="{StaticResource MonoFont}"/>
-                                <TextBlock Text="宽 (如 1080)" FontSize="11.5" Foreground="{StaticResource TextMuted}"
+                                <TextBlock Text="宽 (如 1080)" FontSize="11.5" Foreground="{DynamicResource TextMuted}"
                                            VerticalAlignment="Center" Margin="11,0" IsHitTestVisible="False">
                                     <TextBlock.Style>
                                         <Style TargetType="TextBlock">
@@ -96,11 +96,11 @@
                                     </TextBlock.Style>
                                 </TextBlock>
                             </Grid>
-                            <TextBlock Grid.Column="1" Text="×" FontSize="13.5" VerticalAlignment="Center" Margin="8,0" Foreground="{StaticResource TextSecondary}"/>
+                            <TextBlock Grid.Column="1" Text="×" FontSize="13.5" VerticalAlignment="Center" Margin="8,0" Foreground="{DynamicResource TextSecondary}"/>
                             <Grid Grid.Column="2" Height="34">
                                 <TextBox x:Name="CustomHeightBox" Style="{StaticResource DarkTextBox}" Padding="10,0"
                                          VerticalContentAlignment="Center" FontFamily="{StaticResource MonoFont}"/>
-                                <TextBlock Text="高 (如 2400)" FontSize="11.5" Foreground="{StaticResource TextMuted}"
+                                <TextBlock Text="高 (如 2400)" FontSize="11.5" Foreground="{DynamicResource TextMuted}"
                                            VerticalAlignment="Center" Margin="11,0" IsHitTestVisible="False">
                                     <TextBlock.Style>
                                         <Style TargetType="TextBlock">
@@ -125,7 +125,7 @@
                 <TextBox x:Name="SearchBox" Style="{StaticResource DarkTextBox}" Padding="34,8,12,8"
                          TextChanged="OnSearchChanged" ToolTip="支持品牌或型号模糊搜索（如 iPhone 17、Mate 70、xiaomi）"/>
                 <TextBlock Text="搜索品牌或型号（如 iPhone 17、Mate 70、xiaomi）..."
-                           FontSize="12" Foreground="{StaticResource TextMuted}"
+                           FontSize="12" Foreground="{DynamicResource TextMuted}"
                            VerticalAlignment="Center" Margin="35,0,12,0"
                            IsHitTestVisible="False">
                     <TextBlock.Style>
@@ -141,7 +141,7 @@
                 </TextBlock>
                 <Path Data="M7,12 A5,5 0 1 1 7,2 A5,5 0 1 1 7,12 Z M11,11 L14.5,14.5"
                       Width="14" Height="14" Stretch="Uniform"
-                      Stroke="{StaticResource TextMuted}" StrokeThickness="1.6"
+                      Stroke="{DynamicResource TextMuted}" StrokeThickness="1.6"
                       StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                       HorizontalAlignment="Left" VerticalAlignment="Center" Margin="12,0,0,0"
                       IsHitTestVisible="False"/>
@@ -149,11 +149,11 @@
 
             <!-- Model Catalog Bento List -->
             <ListBox x:Name="ModelList" Grid.Row="2"
-                     Background="{StaticResource BgCard}"
-                     BorderBrush="{StaticResource BorderSubtle}"
+                     Background="{DynamicResource BgCard}"
+                     BorderBrush="{DynamicResource BorderSubtle}"
                      BorderThickness="1"
                      Padding="4"
-                     Foreground="{StaticResource TextPrimary}"
+                     Foreground="{DynamicResource TextPrimary}"
                      HorizontalContentAlignment="Stretch"
                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                      MouseDoubleClick="OnModelDoubleClick">
@@ -186,11 +186,11 @@
                                     </Border>
                                     <ControlTemplate.Triggers>
                                         <Trigger Property="IsMouseOver" Value="True">
-                                            <Setter TargetName="Bd" Property="Background" Value="#1EFFFFFF"/>
+                                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource ChromeHoverBg}"/>
                                         </Trigger>
                                         <Trigger Property="IsSelected" Value="True">
-                                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentSoftBg}"/>
-                                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource AccentSoftBorder}"/>
+                                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource AccentSoftBg}"/>
+                                            <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource AccentSoftBorder}"/>
                                         </Trigger>
                                     </ControlTemplate.Triggers>
                                 </ControlTemplate>
@@ -206,9 +206,9 @@
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
                             <StackPanel VerticalAlignment="Center" Margin="0,0,10,0">
-                                <TextBlock Text="{Binding DisplayTitle}" FontSize="13.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimary}"/>
+                                <TextBlock Text="{Binding DisplayTitle}" FontSize="13.5" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimary}"/>
                                 <TextBlock Text="{Binding ResolutionText}" FontFamily="{StaticResource MonoFont}" FontSize="11.5"
-                                           Foreground="{StaticResource TextSecondary}" Margin="0,2,0,0"/>
+                                           Foreground="{DynamicResource TextSecondary}" Margin="0,2,0,0"/>
                             </StackPanel>
                             <Button Grid.Column="1" Content="选用" Style="{StaticResource SecondaryButton}" Padding="12,5" FontSize="12"
                                     Click="OnSelectRow" Tag="{Binding}" VerticalAlignment="Center"/>
@@ -217,7 +217,7 @@
                 </ListBox.ItemTemplate>
             </ListBox>
 
-            <TextBlock Grid.Row="3" Margin="2,10,2,0" FontSize="11" Foreground="{StaticResource TextMuted}" TextWrapping="Wrap"
+            <TextBlock Grid.Row="3" Margin="2,10,2,0" FontSize="11" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap"
                        Text="提示：更换比例在线生效；若已在 UU远程 中连接，切换一次屏幕再切回即可同步精确点按。"/>
         </Grid>
     </Grid>

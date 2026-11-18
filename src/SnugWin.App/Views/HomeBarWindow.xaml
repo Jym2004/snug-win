@@ -4,13 +4,13 @@
         Title="SnugHomeBar"
         WindowStyle="None"
         AllowsTransparency="False"
-        Background="#000000"
+        Background="{DynamicResource HomeBarBg}"
         ShowInTaskbar="False"
         ResizeMode="NoResize"
         Topmost="True">
     <Grid x:Name="RootGrid"
           Cursor="Hand"
-          Background="#000000"
+          Background="{DynamicResource HomeBarBg}"
           MouseLeftButtonUp="OnBarClick"
           PreviewMouseWheel="OnBarWheel"
           ToolTip="点按或上滑回到 App 资源库">
@@ -25,18 +25,18 @@
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center">
                 <Rectangle Canvas.Left="1" Canvas.Top="4" Width="20" Height="13" RadiusX="3" RadiusY="3"
-                           Stroke="#B0EBEBF5" StrokeThickness="1.8"/>
+                           Stroke="{DynamicResource HomeBarFg}" StrokeThickness="1.8"/>
                 <Path Data="M 7,4 L 8.5,1.5 L 13.5,1.5 L 15,4"
-                      Stroke="#B0EBEBF5" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                      Stroke="{DynamicResource HomeBarFg}" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
                 <Ellipse Canvas.Left="7.5" Canvas.Top="7" Width="7" Height="7"
-                         Stroke="#B0EBEBF5" StrokeThickness="1.8"/>
+                         Stroke="{DynamicResource HomeBarFg}" StrokeThickness="1.8"/>
             </Canvas>
         </Grid>
 
         <!-- Center chevron grabber -->
         <Path x:Name="ChevronPath"
               Data="M 0,6 L 14,0 L 28,6"
-              Stroke="#B0EBEBF5"
+              Stroke="{DynamicResource HomeBarFg}"
               StrokeThickness="3"
               StrokeStartLineCap="Round"
               StrokeEndLineCap="Round"
