@@ -16,16 +16,41 @@ public sealed class PhoneDisplayService : IPhoneDisplays, IAsyncDisposable
     private static readonly TimeSpan OnlineTimeout = TimeSpan.FromSeconds(8);
     private static readonly TimeSpan OfflineTimeout = TimeSpan.FromSeconds(10);
 
-    private readonly VirtualDisplayIpcClient _ipc;
+    private readonly IVirtualDisplayIpc _ipc;
     private readonly OwnedDisplayStore? _ownedStore;
+    private readonly Func<bool> _isPipeAvailable;
+    private readonly Func<IReadOnlyList<MonitorSnapshot>> _getActiveMonitors;
+    private readonly Func<int, int, int, int, bool> _tryAttachVirtual;
+    private readonly TimeSpan _onlineTimeout;
     private readonly Dictionary<uint, ScreenFit> _fits = new();
     private readonly Dictionary<uint, string> _deviceNames = new();
 
     public PhoneDisplayService(VirtualDisplayIpcClient? ipc = null, SnugPaths? paths = null)
+        : this(
+            (IVirtualDisplayIpc?)ipc ?? new VirtualDisplayIpcClient(),
+            paths,
+            () => VirtualDisplayIpcClient.IsDriverPipeAvailable(),
+            () => DisplayConfigService.GetActiveMonitors(),
+            (w, h, x, y) => DisplayConfigService.TryAttachVirtualDisplay(w, h, x, y, out _),
+            OnlineTimeout)
     {
-        _ipc = ipc ?? new VirtualDisplayIpcClient();
+    }
+
+    internal PhoneDisplayService(
+        IVirtualDisplayIpc ipc,
+        SnugPaths? paths,
+        Func<bool> isPipeAvailable,
+        Func<IReadOnlyList<MonitorSnapshot>> getActiveMonitors,
+        Func<int, int, int, int, bool>? tryAttachVirtual = null,
+        TimeSpan? onlineTimeout = null)
+    {
+        _ipc = ipc;
         if (paths is not null)
             _ownedStore = new OwnedDisplayStore(paths.OwnedDisplaysFile);
+        _isPipeAvailable = isPipeAvailable;
+        _getActiveMonitors = getActiveMonitors;
+        _tryAttachVirtual = tryAttachVirtual ?? ((w, h, x, y) => DisplayConfigService.TryAttachVirtualDisplay(w, h, x, y, out _));
+        _onlineTimeout = onlineTimeout ?? OnlineTimeout;
     }
 
     public async Task CleanupOrphansAsync(CancellationToken ct = default)
@@ -34,9 +59,9 @@ public sealed class PhoneDisplayService : IPhoneDisplays, IAsyncDisposable
         var ownedIds = _ownedStore.LoadIds();
         if (ownedIds.Count == 0) return;
 
-        if (!VirtualDisplayIpcClient.IsDriverPipeAvailable())
+        if (!_isPipeAvailable())
         {
-            _ownedStore.ClearAll();
+            Log.Warn("启动清理时驱动管道暂未就绪，保留归属记录以便管道恢复后清理");
             return;
         }
 
@@ -55,7 +80,7 @@ public sealed class PhoneDisplayService : IPhoneDisplays, IAsyncDisposable
 
     public async Task<uint> CreateAsync(ScreenFit fit, CancellationToken ct = default)
     {
-        if (!VirtualDisplayIpcClient.IsDriverPipeAvailable())
+        if (!_isPipeAvailable())
         {
             Log.Warn("未检测到虚拟屏管道，尝试自动重启 Cherry Virtual Display 设备...");
             if (await TryRestartVirtualDisplayDeviceAsync(ct).ConfigureAwait(false))
@@ -70,12 +95,18 @@ public sealed class PhoneDisplayService : IPhoneDisplays, IAsyncDisposable
             }
         }
 
-        var existingDevices = DisplayConfigService.GetActiveMonitors()
+        var beforeMonitors = _getActiveMonitors();
+        var existingDevices = beforeMonitors
             .Select(m => m.DeviceName)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+        int existingVirtualCount = beforeMonitors.Count(m =>
+            m.DeviceString.Contains("Virtual", StringComparison.OrdinalIgnoreCase)
+            || m.FriendlyName.Contains("VirtuDisplay", StringComparison.OrdinalIgnoreCase)
+            || m.FriendlyName.Contains("Virtual", StringComparison.OrdinalIgnoreCase));
+
         var modes = BuildModes(fit);
-        foreach (uint candidateId in PhoneScreenSpec.CandidateIds)
+        foreach (uint candidateId in CandidateIdsStartingAfter(existingVirtualCount))
         {
             try
             {
@@ -90,11 +121,10 @@ public sealed class PhoneDisplayService : IPhoneDisplays, IAsyncDisposable
             }
 
             var (basePxW, basePxH) = fit.PixelSize(fit.BaseWidth);
-            var snapshot = await WaitForOnlineAsync(existingDevices, basePxW, basePxH, ct).ConfigureAwait(false);
+            var snapshot = await WaitForOnlineAsync(existingDevices, basePxW, basePxH, _onlineTimeout, _getActiveMonitors, _tryAttachVirtual, ct).ConfigureAwait(false);
             if (snapshot is null)
             {
-                Log.Warn($"手机屏（id={candidateId}）创建后 {OnlineTimeout.TotalSeconds:0}s 内未在 Windows 上线，尝试备用 ID");
-                try { await _ipc.RemoveAsync([candidateId], ct).ConfigureAwait(false); } catch { }
+                Log.Warn($"手机屏（id={candidateId}）创建后 {_onlineTimeout.TotalSeconds:0.#}s 内未在 Windows 上线，跳过该候选 ID 而不移除未知设备");
                 continue;
             }
 
@@ -107,6 +137,19 @@ public sealed class PhoneDisplayService : IPhoneDisplays, IAsyncDisposable
         }
 
         throw new PhoneScreenException(PhoneScreenErrorKind.NeverOnline);
+    }
+
+    internal static IReadOnlyList<uint> CandidateIdsStartingAfter(int existingVirtualCount)
+    {
+        var ids = PhoneScreenSpec.CandidateIds;
+        if (existingVirtualCount <= 0 || ids.Length <= 1)
+            return ids;
+        int offset = existingVirtualCount % ids.Length;
+        if (offset == 0) return ids;
+        var rotated = new uint[ids.Length];
+        for (int i = 0; i < ids.Length; i++)
+            rotated[i] = ids[(i + offset) % ids.Length];
+        return rotated;
     }
 
     public async Task<bool> ReshapeAsync(uint displayId, ScreenFit fit, CancellationToken ct = default)
@@ -316,12 +359,15 @@ public sealed class PhoneDisplayService : IPhoneDisplays, IAsyncDisposable
         HashSet<string> existingDevices,
         int basePxW,
         int basePxH,
+        TimeSpan timeout,
+        Func<IReadOnlyList<MonitorSnapshot>> getActiveMonitors,
+        Func<int, int, int, int, bool> tryAttachVirtual,
         CancellationToken ct)
     {
         var sw = Stopwatch.StartNew();
-        while (sw.Elapsed < OnlineTimeout && !ct.IsCancellationRequested)
+        while (sw.Elapsed < timeout && !ct.IsCancellationRequested)
         {
-            var all = DisplayConfigService.GetActiveMonitors();
+            var all = getActiveMonitors();
             var newlyAdded = all.FirstOrDefault(m =>
                 !existingDevices.Contains(m.DeviceName)
                 && (m.DeviceString.Contains("Virtual", StringComparison.OrdinalIgnoreCase)
@@ -336,10 +382,10 @@ public sealed class PhoneDisplayService : IPhoneDisplays, IAsyncDisposable
                 return anyNew;
 
             int rightEdge = all.Count > 0 ? (int)all.Max(m => m.Bounds.MaxX) : 2560;
-            if (DisplayConfigService.TryAttachVirtualDisplay(basePxW, basePxH, rightEdge, 0, out _))
+            if (tryAttachVirtual(basePxW, basePxH, rightEdge, 0))
             {
                 await Task.Delay(250, ct).ConfigureAwait(false);
-                var attached = DisplayConfigService.GetActiveMonitors().FirstOrDefault(m => !existingDevices.Contains(m.DeviceName));
+                var attached = getActiveMonitors().FirstOrDefault(m => !existingDevices.Contains(m.DeviceName));
                 if (attached is not null)
                     return attached;
             }

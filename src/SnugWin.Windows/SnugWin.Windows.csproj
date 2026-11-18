@@ -10,5 +10,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\SnugWin.Core\SnugWin.Core.csproj" />
+    <InternalsVisibleTo Include="SnugWin.Core.Tests" />
   </ItemGroup>
 </Project>

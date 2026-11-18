@@ -31,12 +31,21 @@ internal sealed record VddLegacyMonitor(
     [property: JsonPropertyName("id")] uint Id,
     [property: JsonPropertyName("modes")] IReadOnlyList<VddLegacyMode> Modes);
 
+internal interface IVirtualDisplayIpc : IAsyncDisposable
+{
+    bool IsLegacyProtocol { get; }
+    Task NotifyAsync(IReadOnlyList<VddMonitor> monitors, CancellationToken ct = default);
+    Task ReplaceLegacyAsync(IReadOnlyList<uint> removeIds, IReadOnlyList<VddMonitor> addMonitors, CancellationToken ct = default);
+    Task RemoveAsync(IReadOnlyList<uint> ids, CancellationToken ct = default);
+    Task RemoveAllAsync(CancellationToken ct = default);
+}
+
 /// <summary>
 /// Named-pipe client supporting both:
 /// - virtual-display-rs master (InOut byte pipe, EOT 0x04 framing, Notify/Remove/RemoveAll)
 /// - virtual-display-rs v0.3.1 (Out write-only pipe, raw JSON message, Add/Remove/RemoveAll)
 /// </summary>
-public sealed class VirtualDisplayIpcClient : IAsyncDisposable
+public sealed class VirtualDisplayIpcClient : IVirtualDisplayIpc, IAsyncDisposable
 {
     public const string DefaultPipeName = "virtualdisplaydriver";
     public const byte Eot = 0x04;
