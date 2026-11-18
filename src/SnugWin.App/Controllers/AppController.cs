@@ -34,7 +34,7 @@ public sealed class AppController : ILogSink
     private readonly TouchHookService _touchHook;
     private readonly UUSensor _sensor;
     private readonly RemoteSession _session = new();
-    private readonly PhoneDesk _desk;
+    private readonly DeskSet _desks;
     private readonly Screenshots _screenshots;
     private readonly DispatcherTimer _tickTimer;
     private readonly List<string> _recentLogs = new();
@@ -47,29 +47,43 @@ public sealed class AppController : ILogSink
     private IReadOnlyList<RunningApp> _runningApps = Array.Empty<RunningApp>();
     private bool _catalogLoaded;
     private bool _reorderRunningApps = true;
-    private bool _wasListShowing;
-    private PhoneHomeWindow? _phoneHomeWindow;
+    private bool _wasAnyListShowing;
+    private readonly Dictionary<string, PhoneHomeWindow> _screenHomeWindows = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, HomeBarWindow> _screenHomeBars = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, PhoneDeskState> _lastSyncedScreenStates = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, RectD> _lastSyncedScreenBounds = new(StringComparer.OrdinalIgnoreCase);
     private PhoneHomeWindow? _previewHomeWindow;
-    private HomeBarWindow? _homeBarWindow;
     private ScreenshotOverlayWindow? _screenshotOverlayWindow;
     private CropWindow? _cropWindow;
     private CopySelectionBubbleWindow? _copyBubbleWindow;
     private PhoneReentryWindow? _reentryWindow;
     private bool _reentryPillHidden;
     private CapturedImage? _cropWindowImage;
+    private string? _screenshotScreenId;
     private bool _shuttingDown;
     private int _sampling;
-    private PhoneDeskState? _lastSyncedPhoneState;
-    private RectD? _lastSyncedBounds;
     private readonly AppUpdateService _updater = new();
     private UpdateCheckResult? _latestUpdate;
     private ScreenshotOverlay? _lastSyncedOverlay;
     private bool _lastSyncedScreenshotSetting;
+    private string _lastTouchRegionsSig = string.Empty;
 
     public PhoneCatalog Catalog { get; }
     public AppIconCache Icons { get; } = new();
     public AppConfig Config => _config;
-    public PhoneDeskState DeskState => _desk.State;
+    public IReadOnlyList<ScreenConfig> ConfiguredScreens => _config.EffectiveScreens();
+    public PhoneDeskState DeskState => _desks.DeskForScreen(PrimaryTouchScreenId)?.State ?? new PhoneDeskState();
+    public string PrimaryTouchScreenId => _config.PrimaryTouchScreen()?.Id ?? ScreenConfig.LegacyPhoneId;
+
+    public PhoneDeskState GetScreenState(string? screenId) =>
+        _desks.DeskForScreen(screenId ?? PrimaryTouchScreenId)?.State ?? new PhoneDeskState();
+
+    public ScreenConfig? GetScreenConfig(string? screenId)
+    {
+        string targetId = screenId ?? PrimaryTouchScreenId;
+        return _config.EffectiveScreens().FirstOrDefault(s => string.Equals(s.Id, targetId, StringComparison.OrdinalIgnoreCase))
+               ?? _config.PrimaryTouchScreen();
+    }
     public bool ManualOverride => _sensor.ManualOverride;
     public bool CatalogLoaded => _catalogLoaded;
     public string CurrentVersion => AppUpdateService.CurrentVersion;
@@ -86,8 +100,8 @@ public sealed class AppController : ILogSink
     public bool IsDriverPipeAvailable => VirtualDisplayIpcClient.IsDriverPipeAvailable();
     public bool IsElevated => new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
     public string LogDirectory => _paths.LogDirectory;
-    public bool IsPhoneScreenReady => _desk.State.ScreenPhase == PhoneScreenPhase.Ready;
-    public bool CanReenterPhoneScreen => _config.PhoneScreen && _desk.State.Dismissed && (_session.InEpisode || _sensor.ManualOverride);
+    public bool IsPhoneScreenReady => _desks.IsAnyReady;
+    public bool CanReenterPhoneScreen => (_session.InEpisode || _sensor.ManualOverride) && _desks.HasAnyDismissedTouch;
     public AppThemeMode ThemeMode => _config.Theme;
     public bool IsEffectiveDarkTheme => ResolveIsDarkTheme(_config.Theme);
     public IReadOnlyList<RunningApp> RunningApps => _runningApps;
@@ -111,7 +125,7 @@ public sealed class AppController : ILogSink
         _config = (_configStore.LoadOrQuarantine() ?? new AppConfig()).Sanitize();
 
         Catalog = LoadPhoneCatalog();
-        _config = _config with { Phone = Catalog.Resolve(_config.Phone) };
+        _config = _config.ResolveCatalog(Catalog);
         _configStore.Save(_config);
 
         _displays = new PhoneDisplayService(paths: _paths);
@@ -120,20 +134,19 @@ public sealed class AppController : ILogSink
         _touchHook = new TouchHookService();
         _sensor = new UUSensor();
 
-        _desk = new PhoneDesk(
+        _desks = new DeskSet(
             _displays,
             _windows,
             _apps,
             _paths,
-            defaultZoom: _config.ZoomSteps,
-            fit: ScreenFit.FromPhone(_config.Phone.Screen));
+            defaultZoom: _config.ZoomSteps);
         _screenshots = new Screenshots(new ScreenshotService());
         _screenshots.Changed += OnScreenshotChanged;
 
-        _desk.StateChanged += OnDeskStateChanged;
-        _desk.TopologyChanging += () => _session.NoteSelfInducedChange(DateTimeOffset.Now);
-        _desk.Gone += OnDeskGone;
-        _touchHook.CloseWindowRequested += handle => _dispatcher.BeginInvoke(() => _desk.ClosePlaced(handle));
+        _desks.StateChanged += OnDesksStateChanged;
+        _desks.TopologyChanging += () => _session.NoteSelfInducedChange(DateTimeOffset.Now);
+        _desks.Gone += OnDeskGone;
+        _touchHook.CloseWindowRequested += handle => _dispatcher.BeginInvoke(() => _desks.ClosePlaced(handle));
         _touchHook.SelectionCompleted += pt => _dispatcher.BeginInvoke(() => ShowCopySelectionBubble(pt));
         _touchHook.SelectionDismissed += () => _dispatcher.BeginInvoke(() => _copyBubbleWindow?.HideBubble());
         SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
@@ -159,7 +172,16 @@ public sealed class AppController : ILogSink
             });
         });
 
-        _desk.Recover();
+        // Recover any leftover record files from configured screens before starting session loop
+        foreach (var scr in _config.EffectiveScreens())
+        {
+            string recFile = _paths.RecordFileForScreen(scr.Id);
+            if (File.Exists(recFile))
+            {
+                var recDesk = new PhoneDesk(_displays, _windows, _apps, _paths, screenId: scr.Id, screenName: scr.Name);
+                recDesk.Recover();
+            }
+        }
         _tickTimer.Start();
         NotifySummary();
 
@@ -194,25 +216,26 @@ public sealed class AppController : ILogSink
 
             var transitions = _session.Update(signals, now);
             bool ended = transitions.Any(t => t is SessionTransition.Ended);
-            if (ended) _desk.SetWanted(false);
+            if (ended) _desks.SetWishes([]);
 
-            bool wantsPhone = _config.PhoneScreen
-                              && _session.InEpisode
-                              && ControllerClassifier.WantsPhoneScreen(_session.EpisodeControllers(now));
-            _desk.SetWanted(wantsPhone);
-            _desk.SetRemote(_session.InEpisode);
+            bool remote = _session.InEpisode || _sensor.ManualOverride;
+            _desks.SetWishes(ScreenPlan.Wishes(_config, remote));
+            _desks.SetRemote(_session.InEpisode);
 
             if ((now - _lastVerifyAt).TotalSeconds >= 2.0)
             {
                 _lastVerifyAt = now;
-                _desk.VerifyPlacement();
-                _desk.CheckReturns();
-                _desk.SettleDisplays();
+                _desks.VerifyPlacement();
+                _desks.CheckReturns();
+                _desks.SettleDisplays();
             }
 
-            var st = _desk.State;
-            bool showList = st.ScreenPhase == PhoneScreenPhase.Ready && (st.ListVisible || st.Placed is null);
-            if (showList && st.Work is null && (now - _lastCatalogRefresh).TotalSeconds >= 1.5)
+            bool showAnyList = _desks.Wishes.Any(w =>
+                w.IsTouch
+                && _desks.StateOf(w.Id) is { ScreenPhase: PhoneScreenPhase.Ready } dst
+                && (dst.ListVisible || dst.Placed is null)
+                && dst.Work is null);
+            if (showAnyList && (now - _lastCatalogRefresh).TotalSeconds >= 1.5)
             {
                 _lastCatalogRefresh = now;
                 await RefreshRunningAppsAsync();
@@ -266,18 +289,19 @@ public sealed class AppController : ILogSink
         return true;
     }
 
-    private void OnDeskStateChanged(PhoneDeskState state)
+    private void OnDesksStateChanged()
     {
         _dispatcher.BeginInvoke(() =>
         {
-            if (state.ScreenPhase == PhoneScreenPhase.Off || state.DisplayId is null)
+            if (!_desks.IsAnyReady)
             {
                 _screenshots.Dismiss();
+                _screenshotScreenId = null;
                 _catalogLoaded = false;
                 _reorderRunningApps = true;
                 _runningApps = Array.Empty<RunningApp>();
             }
-            else if (state.ScreenPhase == PhoneScreenPhase.Ready && (state.ListVisible || state.Placed is null))
+            else if (_desks.Wishes.Any(w => w.IsTouch && _desks.StateOf(w.Id) is { ScreenPhase: PhoneScreenPhase.Ready } dst && (dst.ListVisible || dst.Placed is null)))
             {
                 RefreshRunningApps();
             }
@@ -292,6 +316,7 @@ public sealed class AppController : ILogSink
     {
         _dispatcher.BeginInvoke(() =>
         {
+            if (overlay is null) _screenshotScreenId = null;
             SyncTouchRegion();
             SyncPhoneWindows(forceSyncUi: false);
             UiStateChanged?.Invoke();
@@ -315,48 +340,74 @@ public sealed class AppController : ILogSink
 
     private void OnDisplaySettingsChanged(object? sender, EventArgs e)
     {
-        _dispatcher.BeginInvoke(() => _desk.DisplaysChanged());
+        _dispatcher.BeginInvoke(() => _desks.DisplaysChanged());
     }
-
-    private RectD? _lastTouchRegionFrame;
 
     private void SyncTouchRegion()
     {
-        var st = _desk.State;
-        bool translating = _config.Gestures && _screenshots.Overlay?.IsCropping != true;
+        bool allowGestures = _config.Gestures;
+        bool anyWindowPlaced = _desks.Wishes.Any(w =>
+            w.IsTouch
+            && _desks.StateOf(w.Id) is { ScreenPhase: PhoneScreenPhase.Ready, ListVisible: false });
+
         _touchHook.RequireInjectedFlag = _config.GesturesInjectedOnly && !_sensor.ManualOverride;
         _touchHook.Options = new TouchOptions(
             AllowScroll: _config.GestureScroll,
             AllowRightClick: _config.GestureLongPressRightClick,
-            NotifySelectionEnded: _config.CopyAfterSelection && !st.ListVisible);
+            NotifySelectionEnded: _config.CopyAfterSelection && anyWindowPlaced);
 
-        if (!translating || st.ScreenPhase != PhoneScreenPhase.Ready || st.DisplayId is not { } id || _displays.BoundsOf(id) is not { } bounds)
+        if (!allowGestures)
         {
-            _lastTouchRegionFrame = null;
-            _touchHook.SetRegion(null);
+            _lastTouchRegionsSig = string.Empty;
+            _touchHook.SetRegions([]);
             return;
         }
-        if (_lastTouchRegionFrame != bounds)
+
+        string? croppingScreenId = _screenshots.Overlay?.IsCropping == true ? _screenshotScreenId : null;
+        var regions = new List<TouchRegion>();
+        var sigParts = new List<string>();
+        foreach (var wish in _desks.Wishes)
         {
-            _lastTouchRegionFrame = bounds;
-            Log.Info($"手势区域更新：{bounds.Short}");
+            if (!wish.IsTouch) continue;
+            if (croppingScreenId is not null && string.Equals(wish.Id, croppingScreenId, StringComparison.OrdinalIgnoreCase))
+                continue;
+            var st = _desks.StateOf(wish.Id);
+            if (st is not { ScreenPhase: PhoneScreenPhase.Ready, DisplayId: { } id }) continue;
+            if (_displays.BoundsOf(id) is not { } bounds) continue;
+            var closeBtn = st.ListVisible ? null : st.CloseButton;
+            regions.Add(TouchRegion.ForPhoneScreen(bounds, closeBtn));
+            sigParts.Add($"{wish.Id}:{bounds.Short}");
         }
-        var closeBtn = st.ListVisible ? null : st.CloseButton;
-        _touchHook.SetRegion(TouchRegion.ForPhoneScreen(bounds, closeBtn));
+
+        string sig = string.Join(";", sigParts);
+        if (sig != _lastTouchRegionsSig)
+        {
+            _lastTouchRegionsSig = sig;
+            if (regions.Count > 0)
+                Log.Info($"触控手势区域更新：{string.Join(" | ", sigParts)}");
+        }
+        _touchHook.SetRegions(regions);
     }
 
     private void ShowCopySelectionBubble(PointD selectionEnd)
     {
-        var st = _desk.State;
-        if (!_config.CopyAfterSelection || st.ListVisible || st.ScreenPhase != PhoneScreenPhase.Ready
-            || st.DisplayId is not { } id || _displays.BoundsOf(id) is not { } bounds)
-            return;
+        if (!_config.CopyAfterSelection) return;
+        foreach (var wish in _desks.Wishes)
+        {
+            if (!wish.IsTouch) continue;
+            var st = _desks.StateOf(wish.Id);
+            if (st is not { ScreenPhase: PhoneScreenPhase.Ready, ListVisible: false, DisplayId: { } id })
+                continue;
+            if (_displays.BoundsOf(id) is not { } bounds || !bounds.Contains(selectionEnd))
+                continue;
 
-        _copyBubbleWindow ??= new CopySelectionBubbleWindow(this);
-        int logicalW = _displays.WidthOf(id) ?? ScreenFit.DesignWidth;
-        double scale = ScreenFit.Scale(logicalW);
-        double dpiRatio = Math.Max(1.0, bounds.Width / Math.Max(1.0, logicalW));
-        _copyBubbleWindow.ShowAtSelection(selectionEnd, bounds, scale, dpiRatio);
+            _copyBubbleWindow ??= new CopySelectionBubbleWindow(this);
+            int logicalW = _displays.WidthOf(id) ?? ScreenFit.DesignWidth;
+            double scale = ScreenFit.Scale(wish.Fit.Size(logicalW));
+            double dpiRatio = Math.Max(1.0, bounds.Width / Math.Max(1.0, logicalW));
+            _copyBubbleWindow.ShowAtSelection(selectionEnd, bounds, scale, dpiRatio);
+            return;
+        }
     }
 
     public Task CopySelectionAtAsync(PointD point) =>
@@ -367,88 +418,141 @@ public sealed class AppController : ILogSink
         await _windows.PerformSelectionActionAsync(point, action);
     }
 
-    public void SyncSubPageActivation(bool focus)
+    public void SyncSubPageActivation(string? screenId, bool focus)
     {
-        if (_phoneHomeWindow is null) return;
-        var st = _desk.State;
-        if (st.ScreenPhase != PhoneScreenPhase.Ready || st.DisplayId is not { } id || _displays.BoundsOf(id) is not { } bounds)
+        string targetId = screenId ?? PrimaryTouchScreenId;
+        if (!_screenHomeWindows.TryGetValue(targetId, out var win)) return;
+        var st = _desks.StateOf(targetId);
+        if (st is not { ScreenPhase: PhoneScreenPhase.Ready, DisplayId: { } id } || _displays.BoundsOf(id) is not { } bounds)
             return;
-        _phoneHomeWindow.ShowOnDisplay(bounds, focusOnShow: focus);
+        win.ShowOnDisplay(bounds, focusOnShow: focus);
     }
 
     private void SyncPhoneWindows(bool forceSyncUi)
     {
-        var st = _desk.State;
+        SyncReentryWindow();
         var overlay = _screenshots.Overlay;
-        if (st.ScreenPhase != PhoneScreenPhase.Ready || st.DisplayId is not { } id || _displays.BoundsOf(id) is not { } bounds)
+        var activeTouchIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        bool anyListShowing = false;
+        bool anyChanged = forceSyncUi
+                          || !Equals(overlay, _lastSyncedOverlay)
+                          || _config.Screenshot != _lastSyncedScreenshotSetting;
+
+        foreach (var wish in _desks.Wishes)
         {
-            _wasListShowing = false;
-            _lastSyncedPhoneState = null;
-            _lastSyncedBounds = null;
-            _lastSyncedOverlay = null;
-            _phoneHomeWindow?.CloseSubPage();
-            _phoneHomeWindow?.Hide();
-            _homeBarWindow?.Hide();
-            HideAndDisposeScreenshotWindows();
-            SyncReentryWindow();
-            return;
+            if (!wish.IsTouch) continue;
+            var st = _desks.StateOf(wish.Id);
+            if (st is not { ScreenPhase: PhoneScreenPhase.Ready, DisplayId: { } id } || _displays.BoundsOf(id) is not { } bounds)
+                continue;
+
+            activeTouchIds.Add(wish.Id);
+            bool stateChanged = anyChanged
+                                || !_lastSyncedScreenStates.TryGetValue(wish.Id, out var prevSt) || !Equals(st, prevSt)
+                                || !_lastSyncedScreenBounds.TryGetValue(wish.Id, out var prevB) || !Equals(bounds, prevB);
+
+            bool showList = st.ListVisible || st.Placed is null;
+            if (showList) anyListShowing = true;
+            if (!stateChanged) continue;
+
+            _lastSyncedScreenStates[wish.Id] = st;
+            _lastSyncedScreenBounds[wish.Id] = bounds;
+
+            if (showList)
+            {
+                if (_screenHomeBars.TryGetValue(wish.Id, out var hb)) hb.Hide();
+                if (!_screenHomeWindows.TryGetValue(wish.Id, out var homeWin) || !homeWin.IsLoaded)
+                {
+                    homeWin = new PhoneHomeWindow(this, previewMode: false, screenId: wish.Id, kind: wish.Device.Kind);
+                    _screenHomeWindows[wish.Id] = homeWin;
+                }
+                else
+                {
+                    homeWin.ConfigureTouchScreen(wish.Id, wish.Device.Kind);
+                }
+                homeWin.ShowOnDisplay(bounds, focusOnShow: false);
+                homeWin.SyncState();
+            }
+            else
+            {
+                if (_screenHomeWindows.TryGetValue(wish.Id, out var homeWin))
+                {
+                    homeWin.CloseSubPage();
+                    homeWin.Hide();
+                }
+                bool croppingThisScreen = overlay?.IsCropping == true
+                    && string.Equals(_screenshotScreenId, wish.Id, StringComparison.OrdinalIgnoreCase);
+                if (croppingThisScreen)
+                {
+                    if (_screenHomeBars.TryGetValue(wish.Id, out var hb)) hb.Hide();
+                }
+                else if (_displays.HomeBarAreaOf(id) is { } barArea)
+                {
+                    if (!_screenHomeBars.TryGetValue(wish.Id, out var hb) || !hb.IsLoaded)
+                    {
+                        hb = new HomeBarWindow(this, wish.Id);
+                        _screenHomeBars[wish.Id] = hb;
+                    }
+                    int logicalW = _displays.WidthOf(id) ?? ScreenFit.DesignWidth;
+                    double scale = ScreenFit.Scale(wish.Fit.Size(logicalW));
+                    hb.ShowAtBounds(barArea, scale, _config.Screenshot);
+                }
+            }
         }
 
-        SyncReentryWindow();
-        if (_previewHomeWindow is { IsLoaded: true })
+        // Clean up windows for inactive/retired/disabled touch screens
+        foreach (string id in _screenHomeWindows.Keys.Where(k => !activeTouchIds.Contains(k)).ToList())
+        {
+            if (_screenHomeWindows.TryGetValue(id, out var hw))
+            {
+                hw.CloseSubPage();
+                hw.Hide();
+            }
+            if (_screenHomeBars.TryGetValue(id, out var hb))
+                hb.Hide();
+            _lastSyncedScreenStates.Remove(id);
+            _lastSyncedScreenBounds.Remove(id);
+        }
+
+        if (activeTouchIds.Count > 0 && _previewHomeWindow is { IsLoaded: true })
         {
             _previewHomeWindow.Close();
             _previewHomeWindow = null;
         }
 
-        bool changed = forceSyncUi
-                       || !Equals(st, _lastSyncedPhoneState)
-                       || !Equals(bounds, _lastSyncedBounds)
-                       || !Equals(overlay, _lastSyncedOverlay)
-                       || _config.Screenshot != _lastSyncedScreenshotSetting;
-        if (!changed) return;
+        if (anyListShowing != _wasAnyListShowing)
+        {
+            _wasAnyListShowing = anyListShowing;
+            if (anyListShowing) _reorderRunningApps = true;
+        }
 
-        _lastSyncedPhoneState = st;
-        _lastSyncedBounds = bounds;
         _lastSyncedOverlay = overlay;
         _lastSyncedScreenshotSetting = _config.Screenshot;
-
-        bool showList = st.ListVisible || st.Placed is null;
-        if (showList != _wasListShowing)
-        {
-            _wasListShowing = showList;
-            if (showList) _reorderRunningApps = true;
-        }
-
-        if (showList)
-        {
-            _homeBarWindow?.Hide();
-            _phoneHomeWindow ??= new PhoneHomeWindow(this);
-            _phoneHomeWindow.ShowOnDisplay(bounds, focusOnShow: false);
-            _phoneHomeWindow.SyncState();
-        }
-        else
-        {
-            _phoneHomeWindow?.CloseSubPage();
-            _phoneHomeWindow?.Hide();
-            if (overlay?.IsCropping == true)
-            {
-                _homeBarWindow?.Hide();
-            }
-            else if (_displays.HomeBarAreaOf(id) is { } barArea)
-            {
-                _homeBarWindow ??= new HomeBarWindow(this);
-                double scale = ScreenFit.Scale(_displays.WidthOf(id) ?? ScreenFit.DesignWidth);
-                _homeBarWindow.ShowAtBounds(barArea, scale, _config.Screenshot);
-            }
-        }
-
-        SyncScreenshotWindows(id, bounds, showList, overlay);
+        SyncScreenshotWindows(overlay);
     }
 
-    private void SyncScreenshotWindows(uint displayId, RectD bounds, bool showList, ScreenshotOverlay? overlay)
+    private void SyncScreenshotWindows(ScreenshotOverlay? overlay)
     {
-        if (showList || overlay is null || overlay.IsCropping)
+        if (overlay is null)
+        {
+            HideAndDisposeScreenshotWindows();
+            return;
+        }
+
+        string? targetId = _screenshotScreenId ?? _desks.Wishes.FirstOrDefault(w => w.IsTouch)?.Id;
+        if (targetId is null || _desks.StateOf(targetId) is not { ScreenPhase: PhoneScreenPhase.Ready, DisplayId: { } displayId, ListVisible: false }
+            || _displays.BoundsOf(displayId) is not { } bounds)
+        {
+            HideAndDisposeScreenshotWindows();
+            return;
+        }
+
+        var wish = _desks.Wishes.FirstOrDefault(w => string.Equals(w.Id, targetId, StringComparison.OrdinalIgnoreCase));
+        int logicalW = _displays.WidthOf(displayId) ?? ScreenFit.DesignWidth;
+        var logicalSize = wish?.Fit.Size(logicalW) ?? new SizeD(logicalW, logicalW);
+        double scale = ScreenFit.Scale(logicalSize);
+        double dpiRatio = Math.Max(1.0, bounds.Width / Math.Max(1.0, logicalW));
+
+        if (overlay.IsCropping)
         {
             _screenshotOverlayWindow?.Close();
             _screenshotOverlayWindow = null;
@@ -456,9 +560,6 @@ public sealed class AppController : ILogSink
         else if (_displays.HomeBarAreaOf(displayId) is { } barArea)
         {
             _screenshotOverlayWindow ??= new ScreenshotOverlayWindow(this);
-            int logicalW = _displays.WidthOf(displayId) ?? ScreenFit.DesignWidth;
-            double scale = ScreenFit.Scale(logicalW);
-            double dpiRatio = Math.Max(1.0, bounds.Width / Math.Max(1.0, logicalW));
             _screenshotOverlayWindow.UpdateAndShow(overlay, barArea, scale, dpiRatio);
         }
 
@@ -492,10 +593,7 @@ public sealed class AppController : ILogSink
 
     public void SetPhoneScreenEnabled(bool enabled)
     {
-        _config = _config with { PhoneScreen = enabled };
-        _configStore.Save(_config);
-        OnTick();
-        UiStateChanged?.Invoke();
+        SetScreenEnabled(PrimaryTouchScreenId, enabled);
     }
 
     public void SetGesturesEnabled(bool enabled)
@@ -699,7 +797,7 @@ public sealed class AppController : ILogSink
     {
         _config = _config with { ZoomSteps = steps.Clamp(AppConfig.MinZoomSteps, AppConfig.MaxZoomSteps) };
         _configStore.Save(_config);
-        _desk.SetDefaultZoom(_config.ZoomSteps);
+        _desks.SetDefaultZoom(_config.ZoomSteps);
         UiStateChanged?.Invoke();
     }
 
@@ -764,28 +862,85 @@ public sealed class AppController : ILogSink
             merged.Insert(0, dict);
     }
 
-    public void SelectPhone(PhoneChoice choice)
+    public void SelectPhone(PhoneChoice choice) =>
+        SelectScreenDevice(PrimaryTouchScreenId, choice);
+
+    public void SelectScreenDevice(string screenId, PhoneChoice choice)
     {
         var resolved = Catalog.Resolve(choice);
-        _config = _config with { Phone = resolved };
+        _config = _config.WithScreenUpdated(screenId, s =>
+        {
+            var nextOrientation = resolved.Kind == DeviceKind.Computer
+                ? SnugWin.Core.PhoneScreen.ScreenOrientation.Landscape
+                : s.Orientation;
+            return s with { Device = resolved, Orientation = nextOrientation };
+        });
         _configStore.Save(_config);
-        _desk.SetFit(ScreenFit.FromPhone(resolved.Screen));
+        OnTick();
         if (_previewHomeWindow is { IsLoaded: true })
         {
-            var wa = System.Windows.SystemParameters.WorkArea;
-            _previewHomeWindow.ApplyPreviewLayout(
-                new SizeD(wa.Width, wa.Height),
-                ScreenFit.FromPhone(resolved.Screen),
-                resolved);
+            var target = _config.EffectiveScreens().FirstOrDefault(s => string.Equals(s.Id, screenId, StringComparison.OrdinalIgnoreCase))
+                         ?? _config.PrimaryTouchScreen();
+            if (target is not null && target.Device.Kind.IsTouch())
+            {
+                var wa = System.Windows.SystemParameters.WorkArea;
+                _previewHomeWindow.ApplyPreviewLayout(
+                    new SizeD(wa.Width, wa.Height),
+                    ScreenPlan.FitOf(target),
+                    target.Device);
+            }
         }
         UiStateChanged?.Invoke();
     }
 
-    public void OpenPhonePreview()
+    public void SetScreenEnabled(string screenId, bool enabled)
     {
-        if (_desk.State.ScreenPhase == PhoneScreenPhase.Ready)
+        _config = _config.WithScreenUpdated(screenId, s => s with { Enabled = enabled });
+        _configStore.Save(_config);
+        OnTick();
+        UiStateChanged?.Invoke();
+    }
+
+    public bool AddScreen(SnugWin.Core.PhoneScreen.ScreenOrientation orientation, PhoneChoice device, string? name = null)
+    {
+        if (ConfiguredScreens.Count >= ScreenConfig.Limit) return false;
+        var resolved = Catalog.Resolve(device);
+        _config = _config.WithScreenAdded(orientation, resolved, name);
+        _configStore.Save(_config);
+        OnTick();
+        UiStateChanged?.Invoke();
+        return true;
+    }
+
+    public void RemoveScreen(string screenId)
+    {
+        _config = _config.WithScreenRemoved(screenId);
+        _configStore.Save(_config);
+        OnTick();
+        UiStateChanged?.Invoke();
+    }
+
+    public void RenameScreen(string screenId, string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return;
+        _config = _config.WithScreenUpdated(screenId, s => s with { Name = name.Trim() });
+        _configStore.Save(_config);
+        OnTick();
+        UiStateChanged?.Invoke();
+    }
+
+    public void OpenPhonePreview() => OpenScreenPreview(null);
+
+    public void OpenScreenPreview(string? screenId)
+    {
+        string targetId = screenId ?? PrimaryTouchScreenId;
+        var targetScreen = _config.EffectiveScreens().FirstOrDefault(s => string.Equals(s.Id, targetId, StringComparison.OrdinalIgnoreCase))
+                           ?? _config.PrimaryTouchScreen();
+        if (targetScreen is null) return;
+
+        if (_desks.StateOf(targetScreen.Id)?.ScreenPhase == PhoneScreenPhase.Ready)
         {
-            _desk.ShowList();
+            _desks.ShowList(targetScreen.Id);
             _ = RefreshRunningAppsAsync();
             return;
         }
@@ -793,15 +948,19 @@ public sealed class AppController : ILogSink
         _ = RefreshRunningAppsAsync();
         if (_previewHomeWindow is null || !_previewHomeWindow.IsLoaded)
         {
-            _previewHomeWindow = new PhoneHomeWindow(this, previewMode: true);
+            _previewHomeWindow = new PhoneHomeWindow(this, previewMode: true, screenId: targetScreen.Id, kind: targetScreen.Device.Kind);
             _previewHomeWindow.Closed += (_, _) => _previewHomeWindow = null;
+        }
+        else
+        {
+            _previewHomeWindow.ConfigureTouchScreen(targetScreen.Id, targetScreen.Device.Kind);
         }
 
         var wa = System.Windows.SystemParameters.WorkArea;
         _previewHomeWindow.ApplyPreviewLayout(
             new SizeD(wa.Width, wa.Height),
-            ScreenFit.FromPhone(_config.Phone.Screen),
-            _config.Phone);
+            ScreenPlan.FitOf(targetScreen),
+            targetScreen.Device);
         _previewHomeWindow.SyncState();
         if (!_previewHomeWindow.IsVisible)
             _previewHomeWindow.Show();
@@ -817,36 +976,58 @@ public sealed class AppController : ILogSink
         UiStateChanged?.Invoke();
     }
 
-    public void PullWindow(WindowInfo w) => _desk.Pull(w);
+    public void PullWindow(WindowInfo w, string? screenId = null) =>
+        _desks.Pull(screenId ?? PrimaryTouchScreenId, w);
 
-    public void OpenApp(AppInfo app)
+    public void OpenApp(AppInfo app, string? screenId = null)
     {
+        string target = screenId ?? PrimaryTouchScreenId;
         switch (AppList.ActionFor(app, _runningApps))
         {
             case AppAction.Pull p:
-                _desk.Pull(p.Window);
+                _desks.Pull(target, p.Window);
                 break;
             case AppAction.Open o:
-                _desk.Open(o.App);
+                _desks.Open(target, o.App);
                 break;
         }
     }
-    public void NewWindow(RunningApp app) => _desk.NewWindow(app);
-    public void QuitApp(RunningApp app) => _desk.Quit(app);
-    public void ForceQuitApp(int pid, string appName) => _desk.ForceQuit(pid, appName);
-    public void CloseWindow(WindowInfo w) => _desk.Close(w);
-    public void ShowList() => _desk.ShowList();
-    public void ReturnToPlaced() => _desk.ReturnToPlaced();
-    public void PutBack() => _desk.PutBack();
-    public void ZoomBy(int delta) => _desk.Zoom(delta);
-    public void DismissNotice() => _desk.DismissNotice();
-    public void DismissScreen() => _desk.DismissScreen();
+
+    public void NewWindow(RunningApp app, string? screenId = null) =>
+        _desks.NewWindow(screenId ?? PrimaryTouchScreenId, app);
+
+    public void QuitApp(RunningApp app, string? screenId = null) =>
+        _desks.Quit(screenId ?? PrimaryTouchScreenId, app);
+
+    public void ForceQuitApp(int pid, string appName, string? screenId = null) =>
+        _desks.ForceQuit(screenId ?? PrimaryTouchScreenId, pid, appName);
+
+    public void CloseWindow(WindowInfo w, string? screenId = null) =>
+        _desks.Close(screenId ?? PrimaryTouchScreenId, w);
+
+    public void ShowList(string? screenId = null) =>
+        _desks.ShowList(screenId ?? PrimaryTouchScreenId);
+
+    public void ReturnToPlaced(string? screenId = null) =>
+        _desks.ReturnToPlaced(screenId ?? PrimaryTouchScreenId);
+
+    public void PutBack(string? screenId = null) =>
+        _desks.PutBack(screenId ?? PrimaryTouchScreenId);
+
+    public void ZoomBy(int delta, string? screenId = null) =>
+        _desks.Zoom(screenId ?? PrimaryTouchScreenId, delta);
+
+    public void DismissNotice(string? screenId = null) =>
+        _desks.DismissNotice(screenId ?? PrimaryTouchScreenId);
+
+    public void DismissScreen(string? screenId = null) =>
+        _desks.DismissScreen(screenId ?? PrimaryTouchScreenId);
 
     public void ReenterScreen()
     {
         _reentryPillHidden = false;
         _reentryWindow?.Hide();
-        _desk.ReenterScreen();
+        _desks.ReenterAllDismissedTouch();
         NotifySummary();
         UiStateChanged?.Invoke();
     }
@@ -877,9 +1058,11 @@ public sealed class AppController : ILogSink
         _reentryWindow.ShowAtBottomRight(mainArea);
     }
 
-    public void TakeScreenshot()
+    public void TakeScreenshot(string? screenId = null)
     {
-        if (_desk.State.Placed is not { } placed) return;
+        string target = screenId ?? PrimaryTouchScreenId;
+        if (_desks.StateOf(target)?.Placed is not { } placed) return;
+        _screenshotScreenId = target;
         _ = _screenshots.TakeAsync(placed.Window);
     }
 
@@ -895,23 +1078,30 @@ public sealed class AppController : ILogSink
     public string GetStatusSummary()
     {
         if (!IsDriverPipeAvailable) return "未检测到虚拟屏驱动";
-        return _desk.State.ScreenPhase switch
+        var readyCount = _desks.Wishes.Count(w => _desks.StateOf(w.Id)?.ScreenPhase == PhoneScreenPhase.Ready);
+        if (readyCount > 0)
         {
-            PhoneScreenPhase.Ready => _session.IsConnected ? "远程中（手机屏已就绪）" : "手机屏就绪",
-            PhoneScreenPhase.Preparing => "正在创建手机屏...",
-            PhoneScreenPhase.Failed => "建屏失败（重试中）",
-            _ => _desk.State.Dismissed && _session.InEpisode
-                ? "远程中（已退出手机屏）"
-                : (_session.IsConnected ? "远程中" : "待机中")
-        };
+            if (readyCount == 1)
+                return _session.IsConnected ? "远程中（虚拟屏已就绪）" : "虚拟屏就绪";
+            return _session.IsConnected ? $"远程中（{readyCount} 块屏就绪）" : $"{readyCount} 块屏就绪";
+        }
+        if (_desks.Wishes.Any(w => _desks.StateOf(w.Id)?.ScreenPhase == PhoneScreenPhase.Preparing))
+            return "正在创建虚拟屏...";
+        if (_desks.Wishes.Any(w => _desks.StateOf(w.Id)?.ScreenPhase == PhoneScreenPhase.Failed))
+            return "建屏失败（重试中）";
+        if (_desks.HasAnyDismissedTouch && _session.InEpisode)
+            return "远程中（已退出触屏）";
+        return _session.IsConnected ? "远程中" : "待机中";
     }
 
     private void NotifySummary() => StateSummaryChanged?.Invoke(GetStatusSummary());
 
     private static PhoneCatalog LoadPhoneCatalog()
     {
-        string path = Path.Combine(AppContext.BaseDirectory, "Assets", "phone-models.json");
-        if (!File.Exists(path)) return PhoneCatalog.Empty;
+        string primary = Path.Combine(AppContext.BaseDirectory, "Assets", "device-models.json");
+        string legacy = Path.Combine(AppContext.BaseDirectory, "Assets", "phone-models.json");
+        string? path = File.Exists(primary) ? primary : (File.Exists(legacy) ? legacy : null);
+        if (path is null) return PhoneCatalog.Empty;
         try
         {
             return PhoneCatalog.LoadFromFile(path);
@@ -948,13 +1138,17 @@ public sealed class AppController : ILogSink
         SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
         SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
         _touchHook.Dispose();
-        await _desk.ShutdownAsync();
+        await _desks.ShutdownAsync();
         await _displays.DisposeAsync();
         HideAndDisposeScreenshotWindows();
         _reentryWindow?.Close();
         _copyBubbleWindow?.Close();
         _previewHomeWindow?.Close();
-        _phoneHomeWindow?.Close();
-        _homeBarWindow?.Close();
+        foreach (var hw in _screenHomeWindows.Values)
+            hw.Close();
+        _screenHomeWindows.Clear();
+        foreach (var hb in _screenHomeBars.Values)
+            hb.Close();
+        _screenHomeBars.Clear();
     }
 }

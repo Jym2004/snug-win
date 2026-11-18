@@ -27,6 +27,7 @@ public partial class PhoneHomeWindow : Window
         public Visibility NormalActionsVis { get; }
         public Visibility AskQuitVis { get; }
         public Visibility QuittingVis { get; }
+        public Brush RailBackground { get; }
         public IReadOnlyList<WindowVm> Windows { get; }
 
         public RunningAppVm(
@@ -35,10 +36,14 @@ public partial class PhoneHomeWindow : Window
             ImageSource icon,
             bool askQuit,
             Func<WindowKey, bool> isAskClose,
-            Action onStateReady)
+            Action onStateReady,
+            bool isSelectedInRail = false)
         {
             App = app;
             Icon = icon;
+            RailBackground = isSelectedInRail
+                ? ResolveThemeBrush("PhoneTagOnBg", Color.FromArgb(0x28, 0x00, 0x7A, 0xFF))
+                : Brushes.Transparent;
             bool quitting = state.Quitting.Contains(app.Pid);
             NotQuitting = !quitting;
             QuittingVis = quitting ? Visibility.Visible : Visibility.Collapsed;
@@ -161,6 +166,8 @@ public partial class PhoneHomeWindow : Window
 
     private readonly AppController _controller;
     private readonly bool _previewMode;
+    private string? _screenId;
+    private DeviceKind _deviceKind;
     private readonly Action _uiChangedHandler;
     private readonly Action<bool> _themeHandler;
     private SubPage _subPage = SubPage.None;
@@ -168,6 +175,8 @@ public partial class PhoneHomeWindow : Window
     private bool _confirmDismiss;
     private int? _confirmQuitPid;
     private WindowKey? _confirmCloseWindow;
+    private int? _selectedLandscapePid;
+    private System.Windows.Controls.Primitives.UniformGrid? _allAppsUniformGrid;
     private (string App, int Pid)? _stalledQuit;
     private bool _lastListVisible = true;
     private DeskWorkKind? _lastWorkKind;
@@ -176,11 +185,13 @@ public partial class PhoneHomeWindow : Window
 
     public bool AcceptsKeys => _subPage != SubPage.None;
 
-    public PhoneHomeWindow(AppController controller, bool previewMode = false)
+    public PhoneHomeWindow(AppController controller, bool previewMode = false, string? screenId = null, DeviceKind kind = DeviceKind.Phone)
     {
         InitializeComponent();
         _controller = controller;
         _previewMode = previewMode;
+        _screenId = screenId;
+        _deviceKind = kind;
         if (_previewMode)
         {
             WindowStyle = WindowStyle.SingleBorderWindow;
@@ -191,6 +202,8 @@ public partial class PhoneHomeWindow : Window
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
             WindowPlacementHelper.ApplyWindowChromeTheme(this, _controller.IsEffectiveDarkTheme);
         }
+        ApplyTopTrailingClear();
+        SizeChanged += (_, _) => UpdateResponsiveLayout();
         _uiChangedHandler = () => Dispatcher.BeginInvoke(SyncState);
         _themeHandler = isDark => Dispatcher.BeginInvoke(() =>
         {
@@ -211,6 +224,44 @@ public partial class PhoneHomeWindow : Window
         UpdateTabStyles();
     }
 
+    public void ConfigureTouchScreen(string screenId, DeviceKind kind)
+    {
+        _screenId = screenId;
+        _deviceKind = kind;
+        ApplyTopTrailingClear();
+        UpdateResponsiveLayout();
+    }
+
+    private bool IsLandscapeLayout =>
+        (!double.IsNaN(PhoneRootGrid.Width) && !double.IsNaN(PhoneRootGrid.Height) && PhoneRootGrid.Width > PhoneRootGrid.Height)
+        || (ActualWidth > 0 && ActualHeight > 0 && ActualWidth > ActualHeight);
+
+    private void ApplyTopTrailingClear()
+    {
+        double trailing = _deviceKind == DeviceKind.Tablet ? 68 : 20;
+        HomeTopRow.Margin = new Thickness(20, 12, trailing, 0);
+        SearchTopRow.Margin = new Thickness(20, 12, trailing, 12);
+        ModelTopRow.Margin = new Thickness(20, 12, trailing, 0);
+    }
+
+    private void UpdateResponsiveLayout()
+    {
+        bool landscape = IsLandscapeLayout;
+        if (_allAppsUniformGrid is not null)
+            _allAppsUniformGrid.Columns = landscape ? 6 : 4;
+        _lastRunningSig = null;
+        RefreshRunningAndAll();
+    }
+
+    private void OnAllAppsUniformGridLoaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is System.Windows.Controls.Primitives.UniformGrid ug)
+        {
+            _allAppsUniformGrid = ug;
+            ug.Columns = IsLandscapeLayout ? 6 : 4;
+        }
+    }
+
     private static Brush ResolveThemeBrush(string key, Color fallback)
     {
         if (System.Windows.Application.Current?.TryFindResource(key) is Brush b)
@@ -228,6 +279,7 @@ public partial class PhoneHomeWindow : Window
         PhoneRootGrid.Height = designH;
         PhoneRootGrid.LayoutTransform = new ScaleTransform(scale, scale);
         Title = $"SnugWin 预览 — {phone.Model ?? "自定义"} ({phone.Screen.Width} × {phone.Screen.Height})";
+        UpdateResponsiveLayout();
     }
 
     public void CloseSubPage()
@@ -251,7 +303,7 @@ public partial class PhoneHomeWindow : Window
 
     public void SyncState()
     {
-        var st = _controller.DeskState;
+        var st = _controller.GetScreenState(_screenId);
 
         if (st.ListVisible != _lastListVisible)
         {
@@ -345,8 +397,9 @@ public partial class PhoneHomeWindow : Window
 
             case DeskWorkKind.Reshaping:
                 BusyIcon.Source = null;
-                BusyTitle.Text = _controller.Config.Phone.Model ?? "自定义";
-                var sc = _controller.Config.Phone.Screen;
+                var dev = _controller.GetScreenConfig(_screenId)?.Device ?? _controller.Config.Phone;
+                BusyTitle.Text = dev.Model ?? "自定义";
+                var sc = dev.Screen;
                 BusySubtitle.Text = $"{sc.Width} × {sc.Height}";
                 BusySubtitle.Visibility = Visibility.Visible;
                 BusyStatus.Text = "正在调整屏幕比例";
@@ -354,7 +407,7 @@ public partial class PhoneHomeWindow : Window
 
             case DeskWorkKind.Dismissing:
                 BusyIcon.Source = null;
-                BusyTitle.Text = PhoneScreenSpec.Name;
+                BusyTitle.Text = _controller.GetScreenConfig(_screenId)?.Name ?? PhoneScreenSpec.Name;
                 BusySubtitle.Visibility = Visibility.Collapsed;
                 BusyStatus.Text = "正在退出";
                 break;
@@ -407,42 +460,80 @@ public partial class PhoneHomeWindow : Window
 
     private void RefreshRunningAndAll()
     {
-        var st = _controller.DeskState;
+        var st = _controller.GetScreenState(_screenId);
         var running = _controller.RunningApps;
+        bool landscape = IsLandscapeLayout;
 
-        string runningSig = BuildRunningSignature(running, st, _controller.CatalogLoaded, _confirmQuitPid, _confirmCloseWindow);
+        string runningSig = BuildRunningSignature(running, st, _controller.CatalogLoaded, _confirmQuitPid, _confirmCloseWindow)
+                            + $"|{(landscape ? 'L' : 'P')}|{_selectedLandscapePid}";
         if (!string.Equals(runningSig, _lastRunningSig, StringComparison.Ordinal))
         {
             _lastRunningSig = runningSig;
-            if (st.Placed is { } placed)
+
+            if (landscape)
             {
-                var placedApp = BuildPlacedApp(placed.Window, running);
-                CurrentAppCardHost.Content = ToVm(placedApp, st);
-                CurrentAppSection.Visibility = Visibility.Visible;
-                var others = running.Where(r => r.Pid != placed.Window.Key.Pid).ToList();
-                OtherAppsHeader.Visibility = others.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-                RunningList.ItemsSource = others.Select(r => ToVm(r, st)).ToList();
-                RunningEmptyState.Visibility = Visibility.Collapsed;
-            }
-            else
-            {
-                CurrentAppSection.Visibility = Visibility.Collapsed;
-                CurrentAppCardHost.Content = null;
-                OtherAppsHeader.Visibility = Visibility.Collapsed;
-                RunningList.ItemsSource = running.Select(r => ToVm(r, st)).ToList();
-                if (!_controller.CatalogLoaded)
+                PortraitRunningView.Visibility = Visibility.Collapsed;
+                if (running.Count == 0)
                 {
-                    RunningEmptyText.Text = "正在读取";
-                    RunningEmptyState.Visibility = Visibility.Visible;
-                }
-                else if (running.Count == 0)
-                {
-                    RunningEmptyText.Text = "没有正在运行的 App";
+                    LandscapeRunningView.Visibility = Visibility.Collapsed;
+                    RunningEmptyText.Text = _controller.CatalogLoaded ? "没有正在运行的 App" : "正在读取";
                     RunningEmptyState.Visibility = Visibility.Visible;
                 }
                 else
                 {
                     RunningEmptyState.Visibility = Visibility.Collapsed;
+                    LandscapeRunningView.Visibility = Visibility.Visible;
+
+                    var ordered = new List<RunningApp>();
+                    RunningApp? placedApp = st.Placed is { } pl ? BuildPlacedApp(pl.Window, running) : null;
+                    if (placedApp is not null) ordered.Add(placedApp);
+                    ordered.AddRange(running.Where(r => placedApp is null || r.Pid != placedApp.Pid));
+
+                    int selectedPid = _selectedLandscapePid is { } sp && ordered.Any(r => r.Pid == sp)
+                        ? sp
+                        : ordered[0].Pid;
+                    _selectedLandscapePid = selectedPid;
+
+                    var vms = ordered.Select(r => ToVm(r, st, isSelectedInRail: r.Pid == selectedPid)).ToList();
+                    LandscapeAppRail.ItemsSource = vms;
+                    LandscapeSelectedCardHost.Content = vms.FirstOrDefault(v => v.App.Pid == selectedPid) ?? vms[0];
+                }
+            }
+            else
+            {
+                LandscapeRunningView.Visibility = Visibility.Collapsed;
+                PortraitRunningView.Visibility = Visibility.Visible;
+
+                if (st.Placed is { } placed)
+                {
+                    var placedApp = BuildPlacedApp(placed.Window, running);
+                    CurrentAppCardHost.Content = ToVm(placedApp, st);
+                    CurrentAppSection.Visibility = Visibility.Visible;
+                    var others = running.Where(r => r.Pid != placed.Window.Key.Pid).ToList();
+                    OtherAppsHeader.Visibility = others.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+                    RunningList.ItemsSource = others.Select(r => ToVm(r, st)).ToList();
+                    RunningEmptyState.Visibility = Visibility.Collapsed;
+                }
+                else
+                {
+                    CurrentAppSection.Visibility = Visibility.Collapsed;
+                    CurrentAppCardHost.Content = null;
+                    OtherAppsHeader.Visibility = Visibility.Collapsed;
+                    RunningList.ItemsSource = running.Select(r => ToVm(r, st)).ToList();
+                    if (!_controller.CatalogLoaded)
+                    {
+                        RunningEmptyText.Text = "正在读取";
+                        RunningEmptyState.Visibility = Visibility.Visible;
+                    }
+                    else if (running.Count == 0)
+                    {
+                        RunningEmptyText.Text = "没有正在运行的 App";
+                        RunningEmptyState.Visibility = Visibility.Visible;
+                    }
+                    else
+                    {
+                        RunningEmptyState.Visibility = Visibility.Collapsed;
+                    }
                 }
             }
         }
@@ -527,14 +618,26 @@ public partial class PhoneHomeWindow : Window
         return new RunningApp(app, placedWindow.Key.Pid, reordered);
     }
 
-    private RunningAppVm ToVm(RunningApp ra, PhoneDeskState st) =>
+    private RunningAppVm ToVm(RunningApp ra, PhoneDeskState st, bool isSelectedInRail = false) =>
         new(
             ra,
             st,
             _controller.Icons.GetIcon(ra.App, ra.Pid),
             _confirmQuitPid == ra.Pid,
             k => _confirmCloseWindow == k,
-            SyncState);
+            SyncState,
+            isSelectedInRail);
+
+    private void OnSelectLandscapeApp(object sender, RoutedEventArgs e)
+    {
+        if (sender is System.Windows.Controls.Button { Tag: RunningAppVm vm })
+        {
+            ClearConfirmations();
+            _selectedLandscapePid = vm.App.Pid;
+            _lastRunningSig = null;
+            RefreshRunningAndAll();
+        }
+    }
 
     private void RefreshSearchPage()
     {
@@ -543,7 +646,7 @@ public partial class PhoneHomeWindow : Window
 
         var running = _controller.RunningApps;
         var installed = _controller.InstalledApps;
-        var st = _controller.DeskState;
+        var st = _controller.GetScreenState(_screenId);
 
         SearchAppRowVm MakeAppRow(AppInfo a)
         {
@@ -581,7 +684,8 @@ public partial class PhoneHomeWindow : Window
     private void RefreshModelPage()
     {
         string q = ModelSearchBox.Text.Trim();
-        var current = _controller.Config.Phone;
+        var cfgScreen = _controller.GetScreenConfig(_screenId);
+        var current = cfgScreen?.Device ?? _controller.Config.Phone;
         CurrentModelTitle.Text = current.Model ?? "自定义";
         CurrentModelSize.Text = $"{current.Screen.Width} × {current.Screen.Height}";
 
@@ -591,13 +695,15 @@ public partial class PhoneHomeWindow : Window
             CustomHeightBox.Text = current.Screen.Height.ToString();
         }
 
-        var brands = _controller.Catalog.Search(q);
+        var kinds = current.Kind.SwappableKinds();
+        var brands = _controller.Catalog.Search(q, kinds);
         CurrentModelSection.Visibility = string.IsNullOrEmpty(q) ? Visibility.Visible : Visibility.Collapsed;
         CustomModelSection.Visibility = (string.IsNullOrEmpty(q) || brands.Count == 0) ? Visibility.Visible : Visibility.Collapsed;
 
+        bool multiKind = brands.Select(b => b.Kind).Distinct().Count() > 1;
         ModelBrandsList.ItemsSource = brands
             .Select(b => new ModelBrandVm(
-                b.Name,
+                multiKind ? $"{b.Name} · {b.Kind.DisplayName()}" : b.Name,
                 b.Models.Select(m => new ModelItemVm(m, m.Id == current.Model)).ToList()))
             .ToList();
     }
@@ -636,7 +742,7 @@ public partial class PhoneHomeWindow : Window
         SearchInputBox.Text = string.Empty;
         RefreshSearchPage();
         UpdatePageVisibility();
-        _controller.SyncSubPageActivation(focus: true);
+        _controller.SyncSubPageActivation(_screenId, focus: true);
         Dispatcher.BeginInvoke(new Action(() => SearchInputBox.Focus()));
     }
 
@@ -647,13 +753,13 @@ public partial class PhoneHomeWindow : Window
         ModelSearchBox.Text = string.Empty;
         RefreshModelPage();
         UpdatePageVisibility();
-        _controller.SyncSubPageActivation(focus: true);
+        _controller.SyncSubPageActivation(_screenId, focus: true);
     }
 
     private void OnCloseSubPage(object sender, RoutedEventArgs e)
     {
         CloseSubPage();
-        _controller.SyncSubPageActivation(focus: false);
+        _controller.SyncSubPageActivation(_screenId, focus: false);
     }
 
     private void OnSearchInputChanged(object sender, TextChangedEventArgs e) => RefreshSearchPage();
@@ -665,8 +771,8 @@ public partial class PhoneHomeWindow : Window
         if (sender is System.Windows.Controls.Button { Tag: PhoneModel m })
         {
             CloseSubPage();
-            _controller.SyncSubPageActivation(focus: false);
-            _controller.SelectPhone(PhoneChoice.FromModel(m));
+            _controller.SyncSubPageActivation(_screenId, focus: false);
+            _controller.SelectScreenDevice(_screenId ?? _controller.PrimaryTouchScreenId, PhoneChoice.FromModel(m));
         }
     }
 
@@ -677,26 +783,26 @@ public partial class PhoneHomeWindow : Window
         var custom = PhoneScreenSpecData.Custom(w, h);
         if (custom is null) return;
         CloseSubPage();
-        _controller.SyncSubPageActivation(focus: false);
-        _controller.SelectPhone(new PhoneChoice(null, custom));
+        _controller.SyncSubPageActivation(_screenId, focus: false);
+        _controller.SelectScreenDevice(_screenId ?? _controller.PrimaryTouchScreenId, new PhoneChoice(null, custom, _deviceKind));
     }
 
-    private void OnBackToPlaced(object sender, RoutedEventArgs e) => _controller.ReturnToPlaced();
-    private void OnPutBack(object sender, RoutedEventArgs e) => _controller.PutBack();
-    private void OnZoomIn(object sender, RoutedEventArgs e) => _controller.ZoomBy(1);
-    private void OnZoomOut(object sender, RoutedEventArgs e) => _controller.ZoomBy(-1);
+    private void OnBackToPlaced(object sender, RoutedEventArgs e) => _controller.ReturnToPlaced(_screenId);
+    private void OnPutBack(object sender, RoutedEventArgs e) => _controller.PutBack(_screenId);
+    private void OnZoomIn(object sender, RoutedEventArgs e) => _controller.ZoomBy(1, _screenId);
+    private void OnZoomOut(object sender, RoutedEventArgs e) => _controller.ZoomBy(-1, _screenId);
     private void OnDismissNotice(object sender, RoutedEventArgs e)
     {
         if (_previewMode)
             NoticeBanner.Visibility = Visibility.Collapsed;
         else
-            _controller.DismissNotice();
+            _controller.DismissNotice(_screenId);
     }
 
     private void OnForceQuitFromNotice(object sender, RoutedEventArgs e)
     {
         if (_stalledQuit is { } sq)
-            _controller.ForceQuitApp(sq.Pid, sq.App);
+            _controller.ForceQuitApp(sq.Pid, sq.App, _screenId);
     }
 
     private void OnAskDismissScreen(object sender, RoutedEventArgs e)
@@ -715,7 +821,7 @@ public partial class PhoneHomeWindow : Window
     private void OnConfirmDismissScreen(object sender, RoutedEventArgs e)
     {
         ClearConfirmations();
-        _controller.DismissScreen();
+        _controller.DismissScreen(_screenId);
     }
 
     private void OnCancelConfirm(object sender, RoutedEventArgs e)
@@ -730,7 +836,7 @@ public partial class PhoneHomeWindow : Window
         if (sender is System.Windows.Controls.Button { Tag: RunningApp ra })
         {
             ClearConfirmations();
-            _controller.OpenApp(ra.App);
+            _controller.OpenApp(ra.App, _screenId);
         }
     }
 
@@ -740,7 +846,7 @@ public partial class PhoneHomeWindow : Window
         if (sender is System.Windows.Controls.Button { Tag: WindowInfo w })
         {
             ClearConfirmations();
-            _controller.PullWindow(w);
+            _controller.PullWindow(w, _screenId);
         }
     }
 
@@ -750,7 +856,7 @@ public partial class PhoneHomeWindow : Window
         if (sender is System.Windows.Controls.Button { Tag: RunningApp ra })
         {
             ClearConfirmations();
-            _controller.NewWindow(ra);
+            _controller.NewWindow(ra, _screenId);
         }
     }
 
@@ -770,7 +876,7 @@ public partial class PhoneHomeWindow : Window
         if (sender is System.Windows.Controls.Button { Tag: RunningApp ra })
         {
             ClearConfirmations();
-            _controller.QuitApp(ra);
+            _controller.QuitApp(ra, _screenId);
         }
     }
 
@@ -790,7 +896,7 @@ public partial class PhoneHomeWindow : Window
         if (sender is System.Windows.Controls.Button { Tag: WindowInfo w })
         {
             ClearConfirmations();
-            _controller.CloseWindow(w);
+            _controller.CloseWindow(w, _screenId);
         }
     }
 
@@ -800,7 +906,7 @@ public partial class PhoneHomeWindow : Window
         if (sender is System.Windows.Controls.Button { Tag: AppInfo app })
         {
             ClearConfirmations();
-            _controller.OpenApp(app);
+            _controller.OpenApp(app, _screenId);
         }
     }
 
@@ -815,8 +921,8 @@ public partial class PhoneHomeWindow : Window
         if (sender is System.Windows.Controls.Button { Tag: AppInfo app })
         {
             CloseSubPage();
-            _controller.SyncSubPageActivation(focus: false);
-            _controller.OpenApp(app);
+            _controller.SyncSubPageActivation(_screenId, focus: false);
+            _controller.OpenApp(app, _screenId);
         }
     }
 
@@ -831,8 +937,8 @@ public partial class PhoneHomeWindow : Window
         if (sender is System.Windows.Controls.Button { Tag: WindowInfo w })
         {
             CloseSubPage();
-            _controller.SyncSubPageActivation(focus: false);
-            _controller.PullWindow(w);
+            _controller.SyncSubPageActivation(_screenId, focus: false);
+            _controller.PullWindow(w, _screenId);
         }
     }
 }

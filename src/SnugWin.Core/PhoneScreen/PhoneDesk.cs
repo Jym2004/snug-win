@@ -69,42 +69,6 @@ public sealed record PhoneDeskState
     public CloseButton? CloseButton { get; init; }
 }
 
-internal sealed class SerialLane
-{
-    private Task _tail = Task.CompletedTask;
-
-    public Task Run(Func<Task> operation)
-    {
-        var previous = _tail;
-        var next = ExecuteAsync(previous, operation);
-        _tail = next;
-        return next;
-    }
-
-    public async Task DrainAsync()
-    {
-        while (true)
-        {
-            var current = _tail;
-            await current.ConfigureAwait(false);
-            if (ReferenceEquals(_tail, current)) return;
-        }
-    }
-
-    private static async Task ExecuteAsync(Task previous, Func<Task> operation)
-    {
-        try
-        {
-            await previous.ConfigureAwait(false);
-        }
-        catch
-        {
-            // previous errors shouldn't break subsequent operations
-        }
-        await operation().ConfigureAwait(false);
-    }
-}
-
 public sealed class PhoneDesk
 {
     private const double RecheckDelay = 1.5;
@@ -131,7 +95,10 @@ public sealed class PhoneDesk
     private readonly ZoomBook _zoomBook;
     private readonly JsonFileStore<LeftBehindBook> _leftBehindFile;
     private readonly LeftBehindBook _leftBehind;
-    private readonly SerialLane _lane = new();
+    private readonly SerialLane _lane;
+    private readonly string _screenId;
+    private string _screenName;
+    private ScreenBehavior _behavior;
 
     private PhoneDeskState _state = new();
     private bool _wanted;
@@ -149,6 +116,11 @@ public sealed class PhoneDesk
     private bool _checkingReturns;
     private (int Pid, HashSet<WindowKey> Known, double Until)? _replaced;
     private readonly Dictionary<WatchedKey, CancellationTokenSource> _watches = new();
+
+    public string ScreenId => _screenId;
+    public string ScreenName => _screenName;
+    public ScreenBehavior Behavior => _behavior;
+    public WindowKey? PlacedWindowKey => _placement?.Window.Key;
 
     public PhoneDeskState State
     {
@@ -175,7 +147,15 @@ public sealed class PhoneDesk
         SnugPaths paths,
         ITimeline? timeline = null,
         int defaultZoom = 2,
-        ScreenFit? fit = null)
+        ScreenFit? fit = null,
+        string? screenId = null,
+        string? screenName = null,
+        ScreenBehavior behavior = ScreenBehavior.TouchScreen,
+        SerialLane? sharedLane = null,
+        ZoomBook? sharedZoomBook = null,
+        JsonFileStore<ZoomBook>? sharedZoomFile = null,
+        LeftBehindBook? sharedLeftBehind = null,
+        JsonFileStore<LeftBehindBook>? sharedLeftBehindFile = null)
     {
         _displays = displays;
         _windows = windows;
@@ -183,11 +163,15 @@ public sealed class PhoneDesk
         _timeline = timeline ?? new SystemTimeline();
         DefaultZoom = defaultZoom;
         Fit = fit ?? ScreenFit.Standard;
-        _ledger = new RestoreRecordStore<PhoneRecord>(paths.PhoneRecordFile);
-        _zoomFile = new JsonFileStore<ZoomBook>(paths.ZoomBookFile);
-        _zoomBook = _zoomFile.LoadOrQuarantine() ?? new ZoomBook();
-        _leftBehindFile = new JsonFileStore<LeftBehindBook>(paths.LeftBehindFile);
-        _leftBehind = _leftBehindFile.LoadOrQuarantine() ?? new LeftBehindBook();
+        _screenId = screenId ?? Config.ScreenConfig.LegacyPhoneId;
+        _screenName = string.IsNullOrWhiteSpace(screenName) ? PhoneScreenSpec.Name : screenName;
+        _behavior = behavior;
+        _lane = sharedLane ?? new SerialLane();
+        _ledger = new RestoreRecordStore<PhoneRecord>(paths.RecordFileForScreen(_screenId));
+        _zoomFile = sharedZoomFile ?? new JsonFileStore<ZoomBook>(paths.ZoomBookFile);
+        _zoomBook = sharedZoomBook ?? _zoomFile.LoadOrQuarantine() ?? new ZoomBook();
+        _leftBehindFile = sharedLeftBehindFile ?? new JsonFileStore<LeftBehindBook>(paths.LeftBehindFile);
+        _leftBehind = sharedLeftBehind ?? _leftBehindFile.LoadOrQuarantine() ?? new LeftBehindBook();
     }
 
     public void SetWanted(bool on)
@@ -222,8 +206,11 @@ public sealed class PhoneDesk
         _ = _lane.Run(ReconcileAsync);
     }
 
-    public void Pull(WindowInfo window)
+    public void Pull(WindowInfo window) => Pull(window, null);
+
+    public void Pull(WindowInfo window, Func<WindowKey, PhoneRecord?>? transferFromOtherScreen)
     {
+        if (_behavior != ScreenBehavior.TouchScreen) return;
         if (State.Quitting.Contains(window.Key.Pid))
         {
             Log.Info($"{window.AppName} 正在退出，不放 {window.Label}");
@@ -232,8 +219,37 @@ public sealed class PhoneDesk
         Begin(new DeskWork(DeskWorkKind.Placing, window.Label));
         _ = _lane.Run(async () =>
         {
-            await PlaceAsync(window);
+            await PlaceAsync(window, zoom: true, transferFromOtherScreen);
             State = State with { Work = null };
+        });
+    }
+
+    internal PhoneRecord? DetachPlacementForTransfer()
+    {
+        if (_placement is not { } p) return null;
+        var transferred = p.Record;
+        SetPlacement(null);
+        State = State with { ListVisible = true };
+        return transferred;
+    }
+
+    public void UpdateWish(string name, ScreenFit fit, ScreenBehavior behavior)
+    {
+        if (!string.IsNullOrWhiteSpace(name))
+            _screenName = name;
+        _behavior = behavior;
+        SetFit(fit);
+    }
+
+    internal Task ReturnWindowIfPlacedAsync(int pid)
+    {
+        return _lane.Run(async () =>
+        {
+            if (_placement is { } p && p.Window.Key.Pid == pid)
+            {
+                await ReturnToOriginalAsync(p);
+                await MatchWidthAsync();
+            }
         });
     }
 
@@ -581,7 +597,7 @@ public sealed class PhoneDesk
         TopologyChanging?.Invoke();
         try
         {
-            uint id = await _displays.CreateAsync(Fit);
+            uint id = await _displays.CreateAsync(Fit, _screenName);
             _display = (id, _timeline.Now);
             _failures = 0;
             await SettleAsync(before, "加屏", permanently: false);
@@ -591,7 +607,7 @@ public sealed class PhoneDesk
                 ScreenPhase = PhoneScreenPhase.Ready,
                 DisplayId = id
             };
-            Log.Info($"手机屏 #{id} 已就绪（{_displays.WidthOf(id)?.ToString() ?? "?"} 宽）");
+            Log.Info($"虚拟屏「{_screenName}」#{id} 已就绪（{_displays.WidthOf(id)?.ToString() ?? "?"} 宽）");
         }
         catch (Exception ex)
         {
@@ -633,6 +649,7 @@ public sealed class PhoneDesk
     {
         if (_placement is { } p) await PutBackAsync(p.Record);
         SetPlacement(null);
+        await EvacuateComputerScreenWindowsAsync();
         await RetireDisplayAsync();
         foreach (var cts in _watches.Values) cts.Cancel();
         _watches.Clear();
@@ -645,6 +662,23 @@ public sealed class PhoneDesk
             Quitting = new HashSet<int>(),
             Closing = new HashSet<WindowKey>()
         };
+    }
+
+    private async Task EvacuateComputerScreenWindowsAsync()
+    {
+        if (_behavior != ScreenBehavior.Computer || _display is not { } d) return;
+        if (_displays.BoundsOf(d.Id) is not { } bounds || _displays.MainArea() is not { } main) return;
+
+        var snapshot = await _windows.SnapshotAsync();
+        foreach (var (key, frame) in snapshot)
+        {
+            if (!bounds.Contains(frame.Center)) continue;
+            double w = Math.Min(frame.Width, main.Width);
+            double h = Math.Min(frame.Height, main.Height);
+            double x = main.X + Math.Max(0, (main.Width - w) / 2.0);
+            double y = main.Y + Math.Max(0, (main.Height - h) / 2.0);
+            _ = await _windows.MoveAsync(key, new RectD(x, y, w, h));
+        }
     }
 
     private async Task RetireDisplayAsync()
@@ -812,7 +846,7 @@ public sealed class PhoneDesk
         await _windows.FocusAsync(p.Window.Key);
     }
 
-    private async Task PlaceAsync(WindowInfo window, bool zoom = true)
+    private async Task PlaceAsync(WindowInfo window, bool zoom = true, Func<WindowKey, PhoneRecord?>? transferFromOtherScreen = null)
     {
         double started = _timeline.Now;
         if (ReadyDisplay($"放 {window.Label}") is not { } id)
@@ -846,9 +880,15 @@ public sealed class PhoneDesk
             .Where(k => k != window.Key)
             .ToHashSet();
 
-        int? owedIdx = _leftBehind.Match(window, look.Frame);
+        PhoneRecord? transferredRecord = transferFromOtherScreen?.Invoke(window.Key);
+        int? owedIdx = transferredRecord is null ? _leftBehind.Match(window, look.Frame) : null;
         PhoneRecord record;
-        if (owedIdx is { } idx)
+        if (transferredRecord is not null)
+        {
+            record = transferredRecord with { Window = window.Key };
+            Log.Info($"{window.Label} 直接跨屏转移，沿用原始还原坐标");
+        }
+        else if (owedIdx is { } idx)
         {
             record = _leftBehind.Entries[idx].ReturnedAs(window.Key);
         }

@@ -209,7 +209,7 @@
             </Grid.RowDefinitions>
 
             <!-- Fixed Top Navigation Row (56px touch target) -->
-            <Grid Grid.Row="0" Height="56" Margin="20,12,20,0">
+            <Grid x:Name="HomeTopRow" Grid.Row="0" Height="56" Margin="20,12,20,0">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
@@ -315,26 +315,65 @@
 
                     <!-- RUNNING TAB -->
                     <StackPanel x:Name="RunningPagePanel" Visibility="Visible">
-                        <StackPanel x:Name="CurrentAppSection" Visibility="Collapsed" Margin="0,0,0,20">
-                            <TextBlock Text="当前 App" FontSize="15" FontWeight="Medium" Foreground="{DynamicResource PhoneSecondaryText}" Margin="4,0,0,8"/>
-                            <ContentControl x:Name="CurrentAppCardHost" ContentTemplate="{StaticResource AppCardTemplate}"/>
+                        <!-- Portrait Single Column -->
+                        <StackPanel x:Name="PortraitRunningView" Visibility="Visible">
+                            <StackPanel x:Name="CurrentAppSection" Visibility="Collapsed" Margin="0,0,0,20">
+                                <TextBlock Text="当前 App" FontSize="15" FontWeight="Medium" Foreground="{DynamicResource PhoneSecondaryText}" Margin="4,0,0,8"/>
+                                <ContentControl x:Name="CurrentAppCardHost" ContentTemplate="{StaticResource AppCardTemplate}"/>
+                            </StackPanel>
+
+                            <TextBlock x:Name="OtherAppsHeader" Text="其他 App" FontSize="15" FontWeight="Medium" Foreground="{DynamicResource PhoneSecondaryText}" Margin="4,0,0,8" Visibility="Collapsed"/>
+                            <ItemsControl x:Name="RunningList" ItemTemplate="{StaticResource AppCardTemplate}"/>
                         </StackPanel>
 
-                        <TextBlock x:Name="OtherAppsHeader" Text="其他 App" FontSize="15" FontWeight="Medium" Foreground="{DynamicResource PhoneSecondaryText}" Margin="4,0,0,8" Visibility="Collapsed"/>
-                        <ItemsControl x:Name="RunningList" ItemTemplate="{StaticResource AppCardTemplate}"/>
+                        <!-- Landscape Two-Column View (Phone Landscape / Tablet Landscape) -->
+                        <Grid x:Name="LandscapeRunningView" Visibility="Collapsed">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="0.9*"/>
+                                <ColumnDefinition Width="14"/>
+                                <ColumnDefinition Width="1.25*"/>
+                            </Grid.ColumnDefinitions>
+                            <Border Grid.Column="0" Background="{DynamicResource PhoneCardBg}" CornerRadius="12" Padding="6" VerticalAlignment="Top">
+                                <ItemsControl x:Name="LandscapeAppRail">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Button Style="{StaticResource FlatBtn}" HorizontalContentAlignment="Stretch"
+                                                    Click="OnSelectLandscapeApp" Tag="{Binding}">
+                                                <Border Background="{Binding RailBackground}" CornerRadius="9" Padding="12,10" Margin="2">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="38"/>
+                                                            <ColumnDefinition Width="*"/>
+                                                        </Grid.ColumnDefinitions>
+                                                        <Image Grid.Column="0" Source="{Binding Icon}" Width="34" Height="34" RenderOptions.BitmapScalingMode="HighQuality"/>
+                                                        <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
+                                                            <TextBlock Text="{Binding AppName}" FontSize="16" FontWeight="SemiBold"
+                                                                       Foreground="{DynamicResource PhoneTextPrimary}" TextTrimming="CharacterEllipsis"/>
+                                                            <TextBlock Text="{Binding Subtitle}" FontSize="13"
+                                                                       Foreground="{Binding SubtitleBrush}" TextTrimming="CharacterEllipsis"/>
+                                                        </StackPanel>
+                                                    </Grid>
+                                                </Border>
+                                            </Button>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </Border>
+                            <ContentControl x:Name="LandscapeSelectedCardHost" Grid.Column="2" ContentTemplate="{StaticResource AppCardTemplate}"/>
+                        </Grid>
 
                         <StackPanel x:Name="RunningEmptyState" Visibility="Collapsed" Margin="0,48,0,48" HorizontalAlignment="Center">
                             <TextBlock x:Name="RunningEmptyText" Text="正在读取" FontSize="18" Foreground="{DynamicResource PhoneSecondaryText}" HorizontalAlignment="Center"/>
                         </StackPanel>
                     </StackPanel>
 
-                    <!-- ALL APPS TAB: 4-Column iOS Icon Grid -->
+                    <!-- ALL APPS TAB: Adaptive Multi-Column Icon Grid -->
                     <StackPanel x:Name="AllAppsPanel" Visibility="Collapsed">
                         <TextBlock x:Name="AllLoadingText" Text="正在读取" FontSize="18" Foreground="{DynamicResource PhoneSecondaryText}" HorizontalAlignment="Center" Margin="0,48,0,48" Visibility="Collapsed"/>
                         <ItemsControl x:Name="AllAppsGrid">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate>
-                                    <UniformGrid Columns="4"/>
+                                    <UniformGrid x:Name="AllAppsUniformGrid" Columns="4" Loaded="OnAllAppsUniformGridLoaded"/>
                                 </ItemsPanelTemplate>
                             </ItemsControl.ItemsPanel>
                             <ItemsControl.ItemTemplate>
@@ -364,7 +403,7 @@
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
 
-            <Grid Grid.Row="0" Margin="20,12,20,12">
+            <Grid x:Name="SearchTopRow" Grid.Row="0" Margin="20,12,20,12">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
@@ -494,7 +533,7 @@
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
 
-            <Grid Grid.Row="0" Height="56" Margin="20,12,20,0">
+            <Grid x:Name="ModelTopRow" Grid.Row="0" Height="56" Margin="20,12,20,0">
                 <TextBlock Text="手机型号" FontSize="20" FontWeight="SemiBold" Foreground="{DynamicResource PhoneTextPrimary}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                 <Button Style="{StaticResource FlatBtn}" HorizontalAlignment="Right" Click="OnCloseSubPage">
                     <TextBlock Text="完成" FontSize="18" FontWeight="SemiBold" Foreground="{DynamicResource PhoneTintBlue}" VerticalAlignment="Center" Padding="8,10"/>

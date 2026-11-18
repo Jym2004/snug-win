@@ -12,15 +12,17 @@ public partial class HomeBarWindow : Window
     private const double SwipeThreshold = 12.0;
     private const double CameraTouchWidth = 56.0;
     private readonly AppController _controller;
+    private readonly string? _screenId;
     private double _scale = 1.0;
     private bool _showsCamera;
     private double _swipeAccum;
     private DateTime _lastWheelAt = DateTime.MinValue;
 
-    public HomeBarWindow(AppController controller)
+    public HomeBarWindow(AppController controller, string? screenId = null)
     {
         InitializeComponent();
         _controller = controller;
+        _screenId = screenId;
     }
 
     public void ShowAtBounds(RectD bounds, double scale, bool showsCamera)
@@ -46,9 +48,9 @@ public partial class HomeBarWindow : Window
         _swipeAccum = 0;
         var pos = e.GetPosition(RootGrid);
         if (_showsCamera && pos.X >= 0 && pos.X <= CameraBox.Width)
-            _controller.TakeScreenshot();
+            _controller.TakeScreenshot(_screenId);
         else
-            _controller.ShowList();
+            _controller.ShowList(_screenId);
     }
 
     private void OnBarWheel(object sender, MouseWheelEventArgs e)
@@ -64,7 +66,7 @@ public partial class HomeBarWindow : Window
             if (_swipeAccum >= SwipeThreshold * _scale)
             {
                 _swipeAccum = 0;
-                _controller.ShowList();
+                _controller.ShowList(_screenId);
             }
         }
         e.Handled = true;

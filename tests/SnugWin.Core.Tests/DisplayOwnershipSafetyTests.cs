@@ -118,8 +118,8 @@ public sealed class DisplayOwnershipSafetyTests
             Assert.Equal(0, ipc.RemoveAllCount);
             Assert.Empty(new OwnedDisplayStore(paths.OwnedDisplaysFile).LoadIds());
 
-            // Should try unused slot #1 first when 1 pre-existing virtual display is present
-            Assert.Equal(new uint[] { 1, 2, 3, 0 }, ipc.NotifiedIds);
+            // Should try unused slot #1 first across 8 candidate slots when 1 pre-existing virtual display is present
+            Assert.Equal(new uint[] { 1, 2, 3, 4, 5, 6, 7, 0 }, ipc.NotifiedIds);
         }
         finally
         {

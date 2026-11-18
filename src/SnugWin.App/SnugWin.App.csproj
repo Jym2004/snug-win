@@ -22,5 +22,8 @@
     <None Include="..\..\Assets\phone-models.json" Link="Assets\phone-models.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Include="..\..\Assets\device-models.json" Link="Assets\device-models.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 </Project>

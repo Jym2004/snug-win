@@ -17,4 +17,9 @@ public sealed record SnugPaths(string DataDirectory)
     public string LeftBehindFile => Path.Combine(DataDirectory, "left-behind.json");
     public string OwnedDisplaysFile => Path.Combine(DataDirectory, "owned-displays.json");
     public string LogDirectory => Path.Combine(DataDirectory, "logs");
+
+    public string RecordFileForScreen(string? screenId) =>
+        string.IsNullOrWhiteSpace(screenId) || string.Equals(screenId, Config.ScreenConfig.LegacyPhoneId, StringComparison.OrdinalIgnoreCase)
+            ? PhoneRecordFile
+            : Path.Combine(DataDirectory, $"screen-{screenId}.json");
 }

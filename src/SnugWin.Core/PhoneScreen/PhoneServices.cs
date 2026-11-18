@@ -11,6 +11,7 @@ public sealed record WindowLook(RectD Frame, bool FullScreen = false, bool Minim
 public interface IPhoneDisplays
 {
     Task<uint> CreateAsync(ScreenFit fit, CancellationToken ct = default);
+    Task<uint> CreateAsync(ScreenFit fit, string? displayName, CancellationToken ct = default) => CreateAsync(fit, ct);
     Task<bool> ReshapeAsync(uint displayId, ScreenFit fit, CancellationToken ct = default);
     ScreenFit? FitOf(uint displayId);
     Task<bool> RetireAsync(uint displayId, CancellationToken ct = default);
@@ -19,6 +20,7 @@ public interface IPhoneDisplays
     Task SetWidthAsync(uint displayId, int width, CancellationToken ct = default);
     RectD? BoundsOf(uint displayId);
     RectD? WindowAreaOf(uint displayId);
+    RectD? HomeBarAreaOf(uint displayId) => null;
     RectD? MainArea();
     IReadOnlyList<OtherDisplay> OtherDisplays();
     Task SetModeAsync(uint displayId, DisplayModeInfo mode, bool permanently, CancellationToken ct = default);

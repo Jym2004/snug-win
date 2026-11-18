@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using SnugWin.Core.PhoneScreen;
@@ -29,19 +31,99 @@ public sealed record AppConfig
     public int ZoomSteps { get; init; } = 2;
     public AppThemeMode Theme { get; init; } = AppThemeMode.Light;
     public PhoneChoice Phone { get; init; } = PhoneChoice.Standard;
+    public IReadOnlyList<ScreenConfig>? Screens { get; init; }
     public bool Welcomed { get; init; } = false;
     public string? LastVersion { get; init; }
+
+    public IReadOnlyList<ScreenConfig> EffectiveScreens()
+    {
+        if (Screens is not null)
+            return Screens;
+        return [ScreenConfig.LegacyPhone(Phone, PhoneScreen)];
+    }
+
+    public ScreenConfig? PrimaryTouchScreen()
+    {
+        var list = EffectiveScreens();
+        return list.FirstOrDefault(s => s.Orientation == ScreenOrientation.Portrait && s.Device.Kind == DeviceKind.Phone)
+            ?? list.FirstOrDefault(s => s.Device.Kind.IsTouch())
+            ?? list.FirstOrDefault();
+    }
 
     public AppConfig Sanitize()
     {
         var phone = Phone.Screen.IsValid ? Phone : PhoneChoice.Standard;
         var theme = Enum.IsDefined(Theme) ? Theme : AppThemeMode.Light;
+
+        IReadOnlyList<ScreenConfig>? sanitizedScreens = null;
+        if (Screens is not null)
+        {
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var list = new List<ScreenConfig>();
+            foreach (var raw in Screens)
+            {
+                if (raw is null || !raw.Device.Screen.IsValid) continue;
+                var clean = raw.Sanitize();
+                if (!seen.Add(clean.Id)) continue;
+                list.Add(clean);
+                if (list.Count >= ScreenConfig.Limit) break;
+            }
+            sanitizedScreens = list;
+        }
+        else
+        {
+            sanitizedScreens = [ScreenConfig.LegacyPhone(phone, PhoneScreen)];
+        }
+
+        var legacyPhone = sanitizedScreens.FirstOrDefault(s =>
+            s.Orientation == ScreenOrientation.Portrait && s.Device.Kind == DeviceKind.Phone);
+
         return this with
         {
             ZoomSteps = ZoomSteps.Clamp(MinZoomSteps, MaxZoomSteps),
             Theme = theme,
-            Phone = phone
+            Phone = legacyPhone?.Device ?? phone,
+            PhoneScreen = legacyPhone?.Enabled ?? sanitizedScreens.Any(s => s.Enabled),
+            Screens = sanitizedScreens
         };
+    }
+
+    public AppConfig WithScreenAdded(ScreenOrientation orientation, PhoneChoice device, string? name = null)
+    {
+        var list = EffectiveScreens().ToList();
+        if (list.Count >= ScreenConfig.Limit) return this;
+        var cleanOrientation = device.Kind == DeviceKind.Computer ? ScreenOrientation.Landscape : orientation;
+        var screen = new ScreenConfig
+        {
+            Id = Guid.NewGuid().ToString("D"),
+            Orientation = cleanOrientation,
+            Device = device,
+            Enabled = true,
+            Name = string.IsNullOrWhiteSpace(name) ? ScreenConfig.SuggestedName(device, cleanOrientation) : name.Trim()
+        }.Sanitize();
+        list.Add(screen);
+        return (this with { Screens = list }).Sanitize();
+    }
+
+    public AppConfig WithScreenRemoved(string id)
+    {
+        var list = EffectiveScreens().Where(s => !string.Equals(s.Id, id, StringComparison.OrdinalIgnoreCase)).ToList();
+        return (this with { Screens = list }).Sanitize();
+    }
+
+    public AppConfig WithScreenUpdated(string id, Func<ScreenConfig, ScreenConfig> update)
+    {
+        var list = EffectiveScreens().Select(s => string.Equals(s.Id, id, StringComparison.OrdinalIgnoreCase) ? update(s) : s).ToList();
+        return (this with { Screens = list }).Sanitize();
+    }
+
+    public AppConfig ResolveCatalog(PhoneCatalog catalog)
+    {
+        var phone = catalog.Resolve(Phone);
+        var screens = EffectiveScreens()
+            .Select(s => s with { Device = catalog.Resolve(s.Device) })
+            .ToList();
+        return (this with { Phone = phone, Screens = screens }).Sanitize();
     }
 
     public static AppConfig FromJsonOrDefault(string json)

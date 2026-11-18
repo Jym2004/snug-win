@@ -21,7 +21,8 @@ public sealed class TouchHookService : IDisposable
     private readonly object _gate = new();
     private readonly long _startTick = Stopwatch.GetTimestamp();
 
-    private TouchRegion? _region;
+    private IReadOnlyList<TouchRegion> _regions = Array.Empty<TouchRegion>();
+    private TouchRegion? _activeRegion;
     private TouchTranslator _translator;
     private TouchOptions _options = TouchOptions.Default;
     private PointD _heldPressPoint;
@@ -57,16 +58,28 @@ public sealed class TouchHookService : IDisposable
 
     public bool IsRunning => _hookHandle != IntPtr.Zero;
 
-    public bool SetRegion(TouchRegion? region)
+    public bool SetRegion(TouchRegion? region) =>
+        SetRegions(region is null ? Array.Empty<TouchRegion>() : [region]);
+
+    public bool SetRegions(IReadOnlyList<TouchRegion> regions)
     {
+        bool empty;
         lock (_gate)
         {
-            _region = region;
-            if (region is null)
+            _regions = regions ?? Array.Empty<TouchRegion>();
+            empty = _regions.Count == 0;
+            if (empty)
+            {
+                _activeRegion = null;
                 _translator = default;
+            }
+            else if (_activeRegion is not null)
+            {
+                _activeRegion = _regions.FirstOrDefault(r => r.Frame.Contains(_heldPressPoint)) ?? _regions[0];
+            }
         }
 
-        if (region is null)
+        if (empty)
         {
             Stop();
             return true;
@@ -212,19 +225,26 @@ public sealed class TouchHookService : IDisposable
         bool dismissSelectionBubble = false;
         lock (_gate)
         {
-            region = _region;
-            if (region is null)
+            if (_regions.Count == 0)
                 return Win32.CallNextHookEx(_hookHandle, nCode, wParam, lParam);
+
+            if (kind == TouchInputKind.Press)
+                _activeRegion = _regions.FirstOrDefault(r => r.Frame.Contains(currentPoint));
+
+            region = _activeRegion ?? _regions[0];
 
             bool injected = (info.flags & Win32.LLMHF_INJECTED) != 0;
             if (!_loggedFirstFlag && kind == TouchInputKind.Press && region.Frame.Contains(currentPoint))
             {
                 _loggedFirstFlag = true;
-                Log.Info($"手机屏首次按下事件 flags=0x{info.flags:X} (injected={injected})");
+                Log.Info($"触控屏首次按下事件 flags=0x{info.flags:X} (injected={injected})");
             }
 
             if (_requireInjectedFlag && !injected)
+            {
+                if (kind == TouchInputKind.Release) _activeRegion = null;
                 return Win32.CallNextHookEx(_hookHandle, nCode, wParam, lParam);
+            }
 
             if (kind == TouchInputKind.Press)
             {
@@ -236,7 +256,11 @@ public sealed class TouchHookService : IDisposable
             }
             if (_passthroughBrowserChrome)
             {
-                if (kind == TouchInputKind.Release) _passthroughBrowserChrome = false;
+                if (kind == TouchInputKind.Release)
+                {
+                    _passthroughBrowserChrome = false;
+                    _activeRegion = null;
+                }
                 return Win32.CallNextHookEx(_hookHandle, nCode, wParam, lParam);
             }
 
@@ -247,7 +271,10 @@ public sealed class TouchHookService : IDisposable
                 _heldPressPoint = currentPoint;
             pressOrigin = _heldPressPoint;
             if (kind == TouchInputKind.Release)
+            {
                 _heldPressPoint = default;
+                _activeRegion = null;
+            }
             coasting = _translator.IsCoasting;
         }
 

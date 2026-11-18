@@ -1,10 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using SnugWin.App.Controllers;
 using SnugWin.Core.Config;
+using SnugWin.Core.PhoneScreen;
 using SnugWin.Core.Support;
 using SnugWin.Windows.Support;
 
@@ -56,12 +58,24 @@ public partial class SettingsWindow : Window
         SelectTab(initialTab);
     }
 
+    public sealed record ScreenRowItem(
+        string Id,
+        string Name,
+        string KindOrientationBadge,
+        string DeviceSummary,
+        string StatusLabel,
+        bool Enabled,
+        Visibility ReadyBadgeVisibility,
+        Visibility PreviewVisibility,
+        Visibility DeleteVisibility);
+
     public void SelectTab(int index)
     {
         PageHome.Visibility = index == 0 ? Visibility.Visible : Visibility.Collapsed;
         PageGestures.Visibility = index == 1 ? Visibility.Visible : Visibility.Collapsed;
         PageDiagnostics.Visibility = index == 2 ? Visibility.Visible : Visibility.Collapsed;
         PageAbout.Visibility = index == 3 ? Visibility.Visible : Visibility.Collapsed;
+        PageScreens.Visibility = index == 4 ? Visibility.Visible : Visibility.Collapsed;
 
         bool isHome = index == 0;
         HeaderBrandGroup.Visibility = isHome ? Visibility.Visible : Visibility.Collapsed;
@@ -71,6 +85,7 @@ public partial class SettingsWindow : Window
             1 => "手势与交互细项",
             2 => "驱动状态与实时日志",
             3 => "关于与版本更新",
+            4 => "多屏与设备管理",
             _ => string.Empty
         };
     }
@@ -79,6 +94,7 @@ public partial class SettingsWindow : Window
     private void OnOpenGesturesTab(object sender, RoutedEventArgs e) => SelectTab(1);
     private void OnOpenDiagnosticsTab(object sender, RoutedEventArgs e) => SelectTab(2);
     private void OnOpenAboutTab(object sender, RoutedEventArgs e) => SelectTab(3);
+    private void OnOpenScreensTab(object sender, RoutedEventArgs e) => SelectTab(4);
     private void OnMinimizeClick(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
     private void OnCloseToTrayClick(object sender, RoutedEventArgs e) => Close();
 
@@ -142,11 +158,33 @@ public partial class SettingsWindow : Window
             ManualPhoneCheck.IsChecked = _controller.ManualOverride;
             AutoCheckUpdatesCheck.IsChecked = cfg.AutoCheckUpdates;
 
-            PhoneModelText.Text = cfg.Phone.Model ?? "自定义比例";
-            PhoneSpecText.Text = $"{cfg.Phone.Screen.Width} × {cfg.Phone.Screen.Height} · 200%";
-            double ratio = (double)cfg.Phone.Screen.Width / Math.Max(1, cfg.Phone.Screen.Height);
-            PhoneFrameOutline.Height = 34;
-            PhoneFrameOutline.Width = Math.Clamp(Math.Round(34 * ratio), 14, 28);
+            var primaryCfg = _controller.GetScreenConfig(_controller.PrimaryTouchScreenId);
+            var primaryDevice = primaryCfg?.Device ?? cfg.Phone;
+            var primaryOrient = primaryCfg?.Orientation ?? SnugWin.Core.PhoneScreen.ScreenOrientation.Portrait;
+            PhoneModelText.Text = primaryDevice.Model ?? "自定义比例";
+            var fit = ScreenFit.FromDevice(primaryDevice.Screen, primaryDevice.Kind, primaryOrient);
+            var (pxW, pxH) = fit.PixelSize(fit.BaseWidth);
+            PhoneSpecText.Text = $"{pxW} × {pxH} · {fit.TargetDpiPercent(fit.BaseWidth)}%";
+            double ratio = (double)pxW / Math.Max(1, pxH);
+            if (ratio >= 1.0)
+            {
+                PhoneFrameOutline.Width = 28;
+                PhoneFrameOutline.Height = Math.Clamp(Math.Round(28 / ratio), 14, 28);
+            }
+            else
+            {
+                PhoneFrameOutline.Height = 34;
+                PhoneFrameOutline.Width = Math.Clamp(Math.Round(34 * ratio), 14, 28);
+            }
+
+            var screens = _controller.ConfiguredScreens;
+            int enabledCount = 0;
+            foreach (var s in screens) if (s.Enabled) enabledCount++;
+            ScreensSummaryBadge.Text = screens.Count > 1
+                ? $"多屏 {enabledCount}/{screens.Count} ›"
+                : $"多屏 {screens.Count}/{ScreenConfig.Limit} ›";
+
+            RefreshScreensPage(screens);
 
             ZoomValueText.Text = cfg.ZoomSteps == 0 ? "0" : $"+{cfg.ZoomSteps}";
             ZoomMinusBtn.IsEnabled = cfg.ZoomSteps > AppConfig.MinZoomSteps;
@@ -265,10 +303,123 @@ public partial class SettingsWindow : Window
     }
 
     private void OnReenterClick(object sender, RoutedEventArgs e) => _controller.ReenterScreen();
-    private void OnOpenPreview(object sender, RoutedEventArgs e) => _controller.OpenPhonePreview();
+    private void OnOpenPreview(object sender, RoutedEventArgs e) => _controller.OpenScreenPreview(_controller.PrimaryTouchScreenId);
 
     private void OnOpenModels(object sender, RoutedEventArgs e) =>
-        new PhoneModelWindow(_controller) { Owner = this }.ShowDialog();
+        new PhoneModelWindow(_controller, _controller.PrimaryTouchScreenId) { Owner = this }.ShowDialog();
+
+    private void RefreshScreensPage(IReadOnlyList<ScreenConfig> screens)
+    {
+        var rows = new List<ScreenRowItem>(screens.Count);
+        foreach (var s in screens)
+        {
+            var state = _controller.GetScreenState(s.Id);
+            string kindLabel = s.Device.Kind.DisplayName();
+            string orientLabel = s.Orientation == SnugWin.Core.PhoneScreen.ScreenOrientation.Landscape ? "横屏" : "竖屏";
+            var fit = ScreenFit.FromDevice(s.Device.Screen, s.Device.Kind, s.Orientation);
+            var (pxW, pxH) = fit.PixelSize(fit.BaseWidth);
+            string summary = $"{s.Device.Model ?? "自定义"} · {pxW} × {pxH}";
+            string status = state.ScreenPhase switch
+            {
+                PhoneScreenPhase.Ready => "已连接",
+                PhoneScreenPhase.Preparing => "创建中",
+                PhoneScreenPhase.Failed => "异常",
+                _ => s.Enabled ? "待命" : "已停用"
+            };
+            rows.Add(new ScreenRowItem(
+                Id: s.Id,
+                Name: s.Name,
+                KindOrientationBadge: $"{kindLabel} · {orientLabel}",
+                DeviceSummary: summary,
+                StatusLabel: status,
+                Enabled: s.Enabled,
+                ReadyBadgeVisibility: state.ScreenPhase == PhoneScreenPhase.Ready ? Visibility.Visible : Visibility.Collapsed,
+                PreviewVisibility: s.Device.Kind.IsTouch() ? Visibility.Visible : Visibility.Collapsed,
+                DeleteVisibility: screens.Count > 1 ? Visibility.Visible : Visibility.Collapsed));
+        }
+
+        ScreensList.ItemsSource = rows;
+        AddScreenLimitHint.Text = $"{screens.Count} / {ScreenConfig.Limit}";
+        bool canAdd = screens.Count < ScreenConfig.Limit;
+        AddScreenFormPanel.Visibility = canAdd ? Visibility.Visible : Visibility.Collapsed;
+        AddScreenFullText.Visibility = canAdd ? Visibility.Collapsed : Visibility.Visible;
+        UpdateAddOrientationAvailability();
+    }
+
+    private DeviceKind SelectedAddKind()
+    {
+        if (AddTabletKindBtn.IsChecked == true) return DeviceKind.Tablet;
+        if (AddComputerKindBtn.IsChecked == true) return DeviceKind.Computer;
+        return DeviceKind.Phone;
+    }
+
+    private void UpdateAddOrientationAvailability()
+    {
+        var kind = SelectedAddKind();
+        if (kind == DeviceKind.Computer)
+        {
+            AddLandscapeBtn.IsChecked = true;
+            AddPortraitBtn.IsEnabled = false;
+        }
+        else
+        {
+            AddPortraitBtn.IsEnabled = true;
+        }
+    }
+
+    private void OnAddKindChanged(object sender, RoutedEventArgs e) => UpdateAddOrientationAvailability();
+
+    private void OnScreenEnabledClick(object sender, RoutedEventArgs e)
+    {
+        if (_suppressEvents) return;
+        if (sender is System.Windows.Controls.CheckBox { Tag: string id } cb)
+            _controller.SetScreenEnabled(id, cb.IsChecked == true);
+    }
+
+    private void OnPreviewScreenClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is System.Windows.Controls.Button { Tag: string id })
+            _controller.OpenScreenPreview(id);
+    }
+
+    private void OnSwapScreenModelClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is System.Windows.Controls.Button { Tag: string id })
+            new PhoneModelWindow(_controller, id) { Owner = this }.ShowDialog();
+    }
+
+    private void OnDeleteScreenClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is System.Windows.Controls.Button { Tag: string id })
+            _controller.RemoveScreen(id);
+    }
+
+    private void OnAddScreenWithPicker(object sender, RoutedEventArgs e)
+    {
+        var kind = SelectedAddKind();
+        var orientation = AddLandscapeBtn.IsChecked == true
+            ? SnugWin.Core.PhoneScreen.ScreenOrientation.Landscape
+            : SnugWin.Core.PhoneScreen.ScreenOrientation.Portrait;
+        if (kind == DeviceKind.Computer)
+            orientation = SnugWin.Core.PhoneScreen.ScreenOrientation.Landscape;
+
+        var picker = new PhoneModelWindow(
+            _controller,
+            screenId: null,
+            allowedKinds: new HashSet<DeviceKind> { kind },
+            selectionOnly: true,
+            customTitle: $"选择{kind.DisplayName()}型号（{(orientation == SnugWin.Core.PhoneScreen.ScreenOrientation.Landscape ? "横屏" : "竖屏")}）")
+        {
+            Owner = this
+        };
+
+        if (picker.ShowDialog() == true && picker.SelectedChoice is { } choice)
+        {
+            string? customName = string.IsNullOrWhiteSpace(AddScreenNameBox.Text) ? null : AddScreenNameBox.Text.Trim();
+            if (_controller.AddScreen(orientation, choice, customName))
+                AddScreenNameBox.Clear();
+        }
+    }
 
     private void OnOpenLogDir(object sender, RoutedEventArgs e) =>
         Process.Start(new ProcessStartInfo { FileName = _controller.LogDirectory, UseShellExecute = true });

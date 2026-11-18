@@ -12,7 +12,6 @@ namespace SnugWin.Windows.Display;
 
 public sealed class PhoneDisplayService : IPhoneDisplays, IAsyncDisposable
 {
-    private const int TargetDpiPercent = 200;
     private static readonly TimeSpan OnlineTimeout = TimeSpan.FromSeconds(8);
     private static readonly TimeSpan OfflineTimeout = TimeSpan.FromSeconds(10);
 
@@ -78,7 +77,10 @@ public sealed class PhoneDisplayService : IPhoneDisplays, IAsyncDisposable
         }
     }
 
-    public async Task<uint> CreateAsync(ScreenFit fit, CancellationToken ct = default)
+    public Task<uint> CreateAsync(ScreenFit fit, CancellationToken ct = default) =>
+        CreateAsync(fit, null, ct);
+
+    public async Task<uint> CreateAsync(ScreenFit fit, string? displayName, CancellationToken ct = default)
     {
         if (!_isPipeAvailable())
         {
@@ -105,14 +107,18 @@ public sealed class PhoneDisplayService : IPhoneDisplays, IAsyncDisposable
             || m.FriendlyName.Contains("VirtuDisplay", StringComparison.OrdinalIgnoreCase)
             || m.FriendlyName.Contains("Virtual", StringComparison.OrdinalIgnoreCase));
 
+        string vddName = string.IsNullOrWhiteSpace(displayName) ? PhoneScreenSpec.Name : displayName;
         var modes = BuildModes(fit);
         foreach (uint candidateId in CandidateIdsStartingAfter(existingVirtualCount))
         {
+            if (_fits.ContainsKey(candidateId))
+                continue;
+
             try
             {
-                var mon = new VddMonitor(candidateId, PhoneScreenSpec.Name, true, modes);
+                var mon = new VddMonitor(candidateId, vddName, true, modes);
                 await _ipc.NotifyAsync([mon], ct).ConfigureAwait(false);
-                Log.Info($"已向驱动发送建屏请求（id={candidateId}，共 {modes.Count} 档，基准 {modes[0].Width}x{modes[0].Height}）");
+                Log.Info($"已向驱动发送建屏请求（{vddName} id={candidateId}，共 {modes.Count} 档，首档 {modes[0].Width}x{modes[0].Height}）");
             }
             catch (Exception ex)
             {
@@ -273,12 +279,13 @@ public sealed class PhoneDisplayService : IPhoneDisplays, IAsyncDisposable
         }
 
         var after = FindMonitor(displayId);
-        if (after is not null && after.Mode.DpiScalePercent != TargetDpiPercent)
+        int targetDpi = fit.TargetDpiPercent(width);
+        if (after is not null && after.Mode.DpiScalePercent != targetDpi)
         {
-            if (DisplayConfigService.SetDpiScalePercent(after.AdapterId, after.SourceId, TargetDpiPercent))
+            if (DisplayConfigService.SetDpiScalePercent(after.AdapterId, after.SourceId, targetDpi))
             {
                 var updated = FindMonitor(displayId);
-                Log.Info($"手机屏 #{displayId} 切到 {pxW}x{pxH}，DPI 设为 {updated?.Mode.DpiScalePercent ?? TargetDpiPercent}%");
+                Log.Info($"虚拟屏 #{displayId} 切到 {pxW}x{pxH}，DPI 设为 {updated?.Mode.DpiScalePercent ?? targetDpi}%");
             }
         }
     }
@@ -289,16 +296,22 @@ public sealed class PhoneDisplayService : IPhoneDisplays, IAsyncDisposable
     {
         var mon = FindMonitor(displayId);
         if (mon is null) return null;
-        int logicalW = WidthOf(displayId) ?? ScreenFit.DesignWidth;
-        double scale = Math.Max(1.0, mon.Mode.Width / (double)logicalW);
-        double homeBarPx = Math.Round(ScreenFit.HomeBarHeight(logicalW) * scale);
         var work = mon.WorkArea;
+        if (_fits.TryGetValue(displayId, out var fit) && fit.Kind == DeviceKind.Computer)
+            return work;
+
+        int logicalW = WidthOf(displayId) ?? ScreenFit.DesignWidth;
+        var logicalSize = fit?.Size(logicalW) ?? new SizeD(logicalW, logicalW);
+        double scale = Math.Max(1.0, mon.Mode.Width / (double)logicalW);
+        double homeBarPx = Math.Round(ScreenFit.HomeBarHeight(logicalSize) * scale);
         double h = Math.Max(100, work.Height - homeBarPx);
         return new RectD(work.X, work.Y, work.Width, h);
     }
 
     public RectD? HomeBarAreaOf(uint displayId)
     {
+        if (_fits.TryGetValue(displayId, out var fit) && fit.Kind == DeviceKind.Computer)
+            return null;
         var mon = FindMonitor(displayId);
         if (mon is null || WindowAreaOf(displayId) is not { } area) return null;
         var work = mon.WorkArea;
@@ -346,8 +359,10 @@ public sealed class PhoneDisplayService : IPhoneDisplays, IAsyncDisposable
 
     private static List<VddMode> BuildModes(ScreenFit fit)
     {
-        var list = new List<VddMode>(fit.Widths.Count);
-        foreach (int w in fit.Widths)
+        // Register widest resolution first so Windows / driver brings landscape & hi-res screens online cleanly
+        var order = fit.RegistrationOrder;
+        var list = new List<VddMode>(order.Count);
+        foreach (int w in order)
         {
             var (pxW, pxH) = fit.PixelSize(w);
             list.Add(new VddMode((uint)pxW, (uint)pxH, [60]));
