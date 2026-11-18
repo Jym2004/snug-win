@@ -50,7 +50,7 @@ Name: "installdriver"; Description: "Install or verify virtual-display-rs 0.3.1 
 Name: "autostart"; Description: "Launch SnugWin silently in tray when signing into Windows"; GroupDescription: "Driver & Startup:"; Flags: unchecked
 
 [Files]
-Source: "{#AppDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#AppDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "driver\*"
 Source: "{#DriverDir}\*"; DestDir: "{app}\driver"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#RootDir}\THIRD_PARTY_NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
 

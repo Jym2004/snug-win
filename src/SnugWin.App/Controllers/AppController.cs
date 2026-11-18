@@ -585,7 +585,7 @@ public sealed class AppController : ILogSink
         _ = _dispatcher.BeginInvoke(() => System.Windows.Application.Current.Shutdown());
     }
 
-    public void LaunchDriverInstaller()
+    public async Task<(bool Ready, string Message)> InstallDriverAsync()
     {
         string? script = BundledDriverInstallerScript;
         if (string.IsNullOrEmpty(script))
@@ -595,17 +595,88 @@ public sealed class AppController : ILogSink
                 FileName = "https://github.com/MolotovCherry/virtual-display-rs/releases/tag/v0.3.1",
                 UseShellExecute = true
             });
-            return;
+            return (false, "未找到随包附带的驱动脚本，已打开官方下载页面。");
         }
 
-        Process.Start(new ProcessStartInfo
+        Log.Info($"开始安装随包附带的 virtual-display-rs 驱动：{script}");
+        try
         {
-            FileName = "powershell.exe",
-            Arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{script}\" -Action Install",
-            UseShellExecute = true,
-            Verb = IsElevated ? string.Empty : "runas"
-        });
+            var psi = IsElevated
+                ? new ProcessStartInfo
+                {
+                    FileName = "powershell.exe",
+                    Arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{script}\" -Action Install",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                }
+                : new ProcessStartInfo
+                {
+                    FileName = "powershell.exe",
+                    Arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{script}\" -Action Install",
+                    UseShellExecute = true,
+                    Verb = "runas"
+                };
+
+            using var proc = Process.Start(psi);
+            if (proc is null)
+                return (false, "无法启动 PowerShell 驱动安装进程。");
+
+            if (psi.RedirectStandardOutput)
+            {
+                string stdout = await proc.StandardOutput.ReadToEndAsync().ConfigureAwait(false);
+                string stderr = await proc.StandardError.ReadToEndAsync().ConfigureAwait(false);
+                await proc.WaitForExitAsync().ConfigureAwait(false);
+
+                foreach (string rawLine in stdout.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+                    Log.Info($"[DriverInstaller] {rawLine.Trim()}");
+                foreach (string rawLine in stderr.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+                    Log.Warn($"[DriverInstaller] {rawLine.Trim()}");
+            }
+            else
+            {
+                await proc.WaitForExitAsync().ConfigureAwait(false);
+            }
+
+            if (proc.ExitCode != 0)
+            {
+                string failMsg = $"驱动安装脚本退出码 {proc.ExitCode}，请查看「诊断与日志」详情。";
+                Log.Warn(failMsg);
+                _ = _dispatcher.BeginInvoke(() =>
+                {
+                    NotifySummary();
+                    UiStateChanged?.Invoke();
+                });
+                return (false, failMsg);
+            }
+
+            for (int i = 0; i < 10 && !IsDriverPipeAvailable; i++)
+                await Task.Delay(300).ConfigureAwait(false);
+
+            bool ready = IsDriverPipeAvailable;
+            Log.Info(ready
+                ? "驱动安装完成，虚拟显示器命名管道已就绪。"
+                : "驱动安装已结束，但命名管道暂未就绪（可能需要重启设备或电脑）。");
+
+            _ = _dispatcher.BeginInvoke(() =>
+            {
+                NotifySummary();
+                UiStateChanged?.Invoke();
+            });
+
+            return ready
+                ? (true, "virtual-display-rs 驱动安装成功并已就绪。")
+                : (false, "驱动已安装但命名管道暂未就绪，请尝试重启「Cherry Virtual Display」设备或重启电脑。");
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"驱动安装异常：{ex.Message}");
+            return (false, $"启动驱动安装失败：{ex.Message}");
+        }
     }
+
+    public void LaunchDriverInstaller() => _ = InstallDriverAsync();
 
     private static string? LocateBundledDriverScript()
     {

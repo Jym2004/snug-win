@@ -31,9 +31,9 @@ Built for NetEase UU Remote (GameViewer) on Windows<br>Portrait Virtual Display 
 | Asset | Audience | Description |
 | :--- | :--- | :--- |
 | **`SnugWin-vX.Y.Z-win-x64-setup.exe`** | **Recommended (Installer)** | Inno Setup installer bundling .NET 10 runtime, verified driver setup, shortcuts, and optional autostart |
-| `SnugWin-vX.Y.Z-win-x64-selfcontained.zip` | Portable (No Install) | Self-contained .NET 10 runtime; unzip and run with built-in SHA-256 verified hot updates |
-| `SnugWin-vX.Y.Z-win-x64-frameworkdependent.zip` | Minimal Size | Requires [.NET 10 Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0) |
-| `virtual-display-driver-0.3.1-x64.zip` | Portable First-Time Driver | Virtual display driver + `install-driver.cmd` (already bundled inside `setup.exe`) |
+| `SnugWin-vX.Y.Z-win-x64-selfcontained.zip` | Portable (No Install) | Self-contained .NET 10 runtime + bundled `driver\`; unzip, one-click install driver in-app, and enjoy SHA-256 verified hot updates |
+| `SnugWin-vX.Y.Z-win-x64-frameworkdependent.zip` | Minimal Size | Bundled `driver\`; requires [.NET 10 Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0) |
+| `virtual-display-driver-0.3.1-x64.zip` | Standalone Driver (Optional) | Standalone virtual display driver + `install-driver.cmd` (already bundled inside `setup.exe` and both portable zips) |
 | `checksums.txt` | Integrity Check | SHA-256 hashes for all release assets |
 
 ---
@@ -84,9 +84,8 @@ Enable the optional camera button on the bottom home bar to capture raw pixels o
 3. Optionally enable **"Launch SnugWin silently in tray when signing into Windows"**.
 
 ### Option 2: Portable Zip
-1. Extract `SnugWin-vX.Y.Z-win-x64-selfcontained.zip`.
-2. Run `driver\install-driver.cmd` as Administrator once (if `\\.\pipe\virtualdisplaydriver` is not already present).
-3. Launch `SnugWin.App.exe` (accept UAC prompt — elevated rights enable managing admin terminals/IDEs across UIPI and switching CCD display modes).
+1. Extract `SnugWin-vX.Y.Z-win-x64-selfcontained.zip` (the `driver\` folder is already bundled inside).
+2. Launch `SnugWin.App.exe` (accept UAC prompt — elevated rights enable managing admin terminals/IDEs across UIPI and switching CCD display modes). If the virtual display driver is not yet installed, click **"Install Bundled Driver"** right in the top setup banner (or run `driver\install-driver.cmd` as Administrator).
 
 ### Silent Logon Autostart & Hot Updates
 * **Logon Autostart**: Uses Windows Task Scheduler (`SnugWinAutoStart`, `HighestAvailable`, `--minimized`) so elevated startup runs silently without UAC prompts on every login.

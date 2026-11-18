@@ -31,9 +31,9 @@
 | 资产 | 适用人群 | 说明 |
 | :--- | :--- | :--- |
 | **`SnugWin-vX.Y.Z-win-x64-setup.exe`** | **新手推荐（一键安装）** | Inno Setup 安装包：内置 .NET 10 运行时、自动校验安装虚拟屏驱动、桌面快捷方式与可选开机静默自启 |
-| `SnugWin-vX.Y.Z-win-x64-selfcontained.zip` | 绿色便携 / 免安装 | 内置 .NET 10 运行时，解压即用，支持设置页一键检查与热更新 |
-| `SnugWin-vX.Y.Z-win-x64-frameworkdependent.zip` | 极小体积 | 需本机已装 [.NET 10 Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0) |
-| `virtual-display-driver-0.3.1-x64.zip` | 绿色版首次使用必装 | 虚拟显示器驱动 + 校验安装脚本 `install-driver.cmd`（`setup.exe` 安装包用户已内置，无需另下） |
+| `SnugWin-vX.Y.Z-win-x64-selfcontained.zip` | 绿色便携 / 免安装 | 内置 .NET 10 运行时与驱动包（`driver\`），解压即用并支持设置页一键装驱与热更新 |
+| `SnugWin-vX.Y.Z-win-x64-frameworkdependent.zip` | 极小体积 | 内置驱动包（`driver\`），需本机已装 [.NET 10 Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0) |
+| `virtual-display-driver-0.3.1-x64.zip` | 独立驱动包（备用） | 单独提供的虚拟显示器驱动 + `install-driver.cmd`（`setup.exe` 与便携版均已内置） |
 | `checksums.txt` | 安全校验 | 所有发布资产的 SHA-256 校验和 |
 
 > 从 `v1.2.0` 起，每个版本都同时提供 `setup.exe` 一键安装包（内置驱动安装与自启选项）和绿色便携 zip。
@@ -124,9 +124,8 @@ UU远程 手机端沿用触控板鼠标逻辑；SnugWin 通过独立高优先级
 
 ### 方式二：绿色便携版
 
-1. 下载 `SnugWin-vX.Y.Z-win-x64-selfcontained.zip` 解压到任意固定目录；
-2. 下载 `virtual-display-driver-0.3.1-x64.zip` 解压后右键 `install-driver.cmd` → **以管理员身份运行**（若已装过 `virtual-display-rs 0.3.1+` 且管道 `\\.\pipe\virtualdisplaydriver` 就绪则可跳过）；
-3. 双击 `SnugWin.App.exe`（程序清单配置为 `requireAdministrator` + `PerMonitorV2`，允许 UAC 后即常驻托盘，双态徽标直观反映手机屏状态）。
+1. 下载 `SnugWin-vX.Y.Z-win-x64-selfcontained.zip` 解压到任意固定目录（压缩包已内置 `driver\` 目录）；
+2. 双击 `SnugWin.App.exe`（程序清单配置为 `requireAdministrator` + `PerMonitorV2`，允许 UAC 后常驻托盘）；若首次启动提示缺少虚拟屏驱动，直接在设置窗顶部点击 **「立即一键安装驱动」**（或手动右键 `driver\install-driver.cmd` → 以管理员身份运行）。
 
 ### 开机自启动与自动更新
 

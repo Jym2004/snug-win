@@ -27,6 +27,7 @@ public partial class App : System.Windows.Application
     private System.Windows.Forms.ToolStripMenuItem? _manualPhoneMenuItem;
     private System.Windows.Forms.ToolStripMenuItem? _updateMenuItem;
     private bool _notifiedUpdate;
+    private int _balloonTargetTab = 3;
     private SettingsWindow? _settingsWindow;
 
     protected override void OnStartup(StartupEventArgs e)
@@ -73,6 +74,7 @@ public partial class App : System.Windows.Application
                     if (!_notifiedUpdate && _trayIcon is not null)
                     {
                         _notifiedUpdate = true;
+                        _balloonTargetTab = 3;
                         _trayIcon.ShowBalloonTip(
                             3500,
                             $"SnugWin v{upd.LatestVersion} 已发布",
@@ -90,7 +92,20 @@ public partial class App : System.Windows.Application
         // Show Settings on manual startup (unless --minimized is passed for autostart)
         bool minimized = Array.Exists(e.Args, a => a.Equals("--minimized", StringComparison.OrdinalIgnoreCase));
         if (!minimized)
+        {
             ShowSettings();
+        }
+        else if (!_controller.IsDriverPipeAvailable && _trayIcon is not null)
+        {
+            _balloonTargetTab = 0;
+            _trayIcon.ShowBalloonTip(
+                4500,
+                "SnugWin 虚拟显示器驱动未就绪",
+                _controller.BundledDriverInstallerScript is not null
+                    ? "点击此通知打开设置，即可一键安装随包内置驱动。"
+                    : "点击此通知打开设置查看驱动诊断与安装指引。",
+                System.Windows.Forms.ToolTipIcon.Warning);
+        }
     }
 
     private void SetupTrayIcon()
@@ -153,7 +168,7 @@ public partial class App : System.Windows.Application
             Visible = true
         };
         _trayIcon.DoubleClick += (_, _) => Dispatcher.Invoke(() => ShowSettings(0));
-        _trayIcon.BalloonTipClicked += (_, _) => Dispatcher.Invoke(() => ShowSettings(3));
+        _trayIcon.BalloonTipClicked += (_, _) => Dispatcher.Invoke(() => ShowSettings(_balloonTargetTab));
     }
 
     private static System.Drawing.Icon? LoadResourceIcon(string relativeUri)

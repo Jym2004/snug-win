@@ -7,17 +7,15 @@ Windows 10/11 上为 网易 UU远程 提供手机原生级操作体验的伴侣�
 | 资产 | 说明 |
 | --- | --- |
 | `SnugWin-v{{VERSION}}-win-x64-setup.exe` | **一键安装包**（推荐新手）：内置 .NET 10 运行时、驱动校验安装脚本、桌面快捷方式与可选开机自启 |
-| `SnugWin-v{{VERSION}}-win-x64-selfcontained.zip` | 绿色便携自包含版，内置 .NET 10 运行时，解压即用并支持应用内热更新 |
-| `SnugWin-v{{VERSION}}-win-x64-frameworkdependent.zip` | 体积小，需先装 [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0/runtime/desktop) |
-| `virtual-display-driver-0.3.1-x64.zip` | 独立虚拟显示器驱动包（绿色版首次使用需要单独运行内部 `install-driver.cmd`） |
+| `SnugWin-v{{VERSION}}-win-x64-selfcontained.zip` | 绿色便携自包含版，内置 .NET 10 运行时与虚拟显示器驱动（`driver\`），解压即用并支持应用内一键装驱与热更新 |
+| `SnugWin-v{{VERSION}}-win-x64-frameworkdependent.zip` | 极小体积，内置虚拟显示器驱动（`driver\`），需先装 [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0/runtime/desktop) |
+| `virtual-display-driver-0.3.1-x64.zip` | 独立虚拟显示器驱动包（备用；各安装包与便携包均已内置） |
 
-### 安装三步
+### 安装两步
 
 ```text
-1. 解压驱动包，右键 install-driver.cmd → 以管理员身份运行
-   （脚本做 SHA256 与证书指纹校验，并记录驱动归属，不会误删你原有的同款驱动）
-2. 解压 SnugWin，双击 SnugWin.App.exe（UAC 允许，程序需要管理员权限）
-3. 手机用 UU远程 连入本机 → 自动生成竖屏虚拟屏 + App 资源库
+1. 安装包版：运行 setup.exe，一路默认即可完成装驱与启动；
+2. 绿色便携版：解压 zip 后双击 SnugWin.App.exe（允许 UAC），若尚未装过驱动，直接在设置页顶部点击「立即一键安装驱动」（内置 SHA256 与证书指纹校验，不误删原有同款驱动）
 ```
 
 每个包内都附带 `快速开始.txt`。

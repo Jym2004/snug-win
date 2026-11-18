@@ -77,7 +77,15 @@ public partial class SettingsWindow : Window
 
             if (!pipeOk)
             {
-                DriverWarningText.Text = @"未检测到 \\.\pipe\virtualdisplaydriver，请安装或重启 virtual-display-rs 驱动。";
+                DriverWarningText.Text = _controller.BundledDriverInstallerScript is not null
+                    ? @"未检测到 \\.\pipe\virtualdisplaydriver，本包已内置 virtual-display-rs 0.3.1 安装程序，点击右侧即可校验并自动安装。"
+                    : @"未检测到 \\.\pipe\virtualdisplaydriver，请安装或重启 virtual-display-rs 驱动。";
+                if (InstallDriverBtn.IsEnabled)
+                {
+                    InstallDriverBtn.Content = _controller.BundledDriverInstallerScript is not null
+                        ? "一键安装内置驱动"
+                        : "下载驱动...";
+                }
                 DriverWarningBanner.Visibility = Visibility.Visible;
             }
             else
@@ -230,15 +238,28 @@ public partial class SettingsWindow : Window
         Process.Start(new ProcessStartInfo { FileName = _controller.LogDirectory, UseShellExecute = true });
     }
 
-    private void OnInstallDriver(object sender, RoutedEventArgs e)
+    private async void OnInstallDriver(object sender, RoutedEventArgs e)
     {
+        InstallDriverBtn.IsEnabled = false;
+        InstallDriverBtn.Content = "正在安装驱动...";
+        DriverWarningText.Text = "正在进行 SHA256 校验、导入驱动签名证书并静默安装，请稍候...";
         try
         {
-            _controller.LaunchDriverInstaller();
+            var (ready, message) = await _controller.InstallDriverAsync();
+            if (!ready)
+                DriverWarningText.Text = message;
+            Refresh();
         }
         catch (Exception ex)
         {
             System.Windows.MessageBox.Show($"启动驱动安装程序失败：{ex.Message}", "SnugWin", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            InstallDriverBtn.IsEnabled = true;
+            InstallDriverBtn.Content = _controller.BundledDriverInstallerScript is not null
+                ? "一键安装内置驱动"
+                : "下载驱动...";
         }
     }
 

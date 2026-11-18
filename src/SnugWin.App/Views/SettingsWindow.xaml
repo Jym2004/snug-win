@@ -89,7 +89,7 @@
                         <TextBlock Text="虚拟显示器驱动尚未就绪" FontSize="13" FontWeight="SemiBold" Foreground="#FCD34D"/>
                         <TextBlock x:Name="DriverWarningText" FontSize="12" Foreground="#FDE68A" TextWrapping="Wrap" Margin="0,2,0,0"/>
                     </StackPanel>
-                    <Button Grid.Column="1" Content="一键安装驱动" Style="{StaticResource PrimaryButton}"
+                    <Button x:Name="InstallDriverBtn" Grid.Column="1" Content="一键安装驱动" Style="{StaticResource PrimaryButton}"
                             Padding="12,6" FontSize="12" VerticalAlignment="Center" Click="OnInstallDriver"/>
                 </Grid>
             </Border>
