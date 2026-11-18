@@ -216,11 +216,6 @@ public sealed class AppController : ILogSink
             SyncTouchRegion();
             SyncPhoneWindows(forceSyncUi: false);
             SyncReentryWindow();
-        if (_previewHomeWindow is { IsLoaded: true })
-        {
-            _previewHomeWindow.Close();
-            _previewHomeWindow = null;
-        }
             NotifySummary();
         }
         finally
@@ -391,11 +386,6 @@ public sealed class AppController : ILogSink
             _homeBarWindow?.Hide();
             HideAndDisposeScreenshotWindows();
             SyncReentryWindow();
-        if (_previewHomeWindow is { IsLoaded: true })
-        {
-            _previewHomeWindow.Close();
-            _previewHomeWindow = null;
-        }
             return;
         }
 

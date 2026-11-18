@@ -160,6 +160,7 @@ public partial class PhoneHomeWindow : Window
 
     private readonly AppController _controller;
     private readonly bool _previewMode;
+    private readonly Action _uiChangedHandler;
     private SubPage _subPage = SubPage.None;
     private bool _showAllTab;
     private bool _confirmDismiss;
@@ -189,7 +190,9 @@ public partial class PhoneHomeWindow : Window
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
             WindowPlacementHelper.ApplyModernDarkChrome(this);
         }
-        _controller.UiStateChanged += () => Dispatcher.BeginInvoke(SyncState);
+        _uiChangedHandler = () => Dispatcher.BeginInvoke(SyncState);
+        _controller.UiStateChanged += _uiChangedHandler;
+        Closed += (_, _) => _controller.UiStateChanged -= _uiChangedHandler;
         UpdateTabStyles();
     }
 
