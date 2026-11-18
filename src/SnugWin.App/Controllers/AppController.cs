@@ -49,6 +49,7 @@ public sealed class AppController : ILogSink
     private bool _reorderRunningApps = true;
     private bool _wasListShowing;
     private PhoneHomeWindow? _phoneHomeWindow;
+    private PhoneHomeWindow? _previewHomeWindow;
     private HomeBarWindow? _homeBarWindow;
     private ScreenshotOverlayWindow? _screenshotOverlayWindow;
     private CropWindow? _cropWindow;
@@ -215,6 +216,11 @@ public sealed class AppController : ILogSink
             SyncTouchRegion();
             SyncPhoneWindows(forceSyncUi: false);
             SyncReentryWindow();
+        if (_previewHomeWindow is { IsLoaded: true })
+        {
+            _previewHomeWindow.Close();
+            _previewHomeWindow = null;
+        }
             NotifySummary();
         }
         finally
@@ -385,10 +391,20 @@ public sealed class AppController : ILogSink
             _homeBarWindow?.Hide();
             HideAndDisposeScreenshotWindows();
             SyncReentryWindow();
+        if (_previewHomeWindow is { IsLoaded: true })
+        {
+            _previewHomeWindow.Close();
+            _previewHomeWindow = null;
+        }
             return;
         }
 
         SyncReentryWindow();
+        if (_previewHomeWindow is { IsLoaded: true })
+        {
+            _previewHomeWindow.Close();
+            _previewHomeWindow = null;
+        }
 
         bool changed = forceSyncUi
                        || !Equals(st, _lastSyncedPhoneState)
@@ -627,7 +643,44 @@ public sealed class AppController : ILogSink
         _config = _config with { Phone = resolved };
         _configStore.Save(_config);
         _desk.SetFit(ScreenFit.FromPhone(resolved.Screen));
+        if (_previewHomeWindow is { IsLoaded: true })
+        {
+            var wa = System.Windows.SystemParameters.WorkArea;
+            _previewHomeWindow.ApplyPreviewLayout(
+                new SizeD(wa.Width, wa.Height),
+                ScreenFit.FromPhone(resolved.Screen),
+                resolved);
+        }
         UiStateChanged?.Invoke();
+    }
+
+    public void OpenPhonePreview()
+    {
+        if (_desk.State.ScreenPhase == PhoneScreenPhase.Ready)
+        {
+            _desk.ShowList();
+            _ = RefreshRunningAppsAsync();
+            return;
+        }
+
+        _ = RefreshRunningAppsAsync();
+        if (_previewHomeWindow is null || !_previewHomeWindow.IsLoaded)
+        {
+            _previewHomeWindow = new PhoneHomeWindow(this, previewMode: true);
+            _previewHomeWindow.Closed += (_, _) => _previewHomeWindow = null;
+        }
+
+        var wa = System.Windows.SystemParameters.WorkArea;
+        _previewHomeWindow.ApplyPreviewLayout(
+            new SizeD(wa.Width, wa.Height),
+            ScreenFit.FromPhone(_config.Phone.Screen),
+            _config.Phone);
+        _previewHomeWindow.SyncState();
+        if (!_previewHomeWindow.IsVisible)
+            _previewHomeWindow.Show();
+        if (_previewHomeWindow.WindowState == System.Windows.WindowState.Minimized)
+            _previewHomeWindow.WindowState = System.Windows.WindowState.Normal;
+        _previewHomeWindow.Activate();
     }
 
     public void SetManualOverride(bool on)
@@ -772,6 +825,7 @@ public sealed class AppController : ILogSink
         HideAndDisposeScreenshotWindows();
         _reentryWindow?.Close();
         _copyBubbleWindow?.Close();
+        _previewHomeWindow?.Close();
         _phoneHomeWindow?.Close();
         _homeBarWindow?.Close();
     }

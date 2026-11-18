@@ -215,6 +215,11 @@ public partial class SettingsWindow : Window
             _controller.SetDefaultZoomSteps(val);
     }
 
+    private void OnOpenPreview(object sender, RoutedEventArgs e)
+    {
+        _controller.OpenPhonePreview();
+    }
+
     private void OnOpenModels(object sender, RoutedEventArgs e)
     {
         new PhoneModelWindow(_controller) { Owner = this }.ShowDialog();

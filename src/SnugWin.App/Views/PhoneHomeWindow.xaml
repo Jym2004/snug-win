@@ -208,7 +208,7 @@
         </DataTemplate>
     </Window.Resources>
 
-    <Grid Background="{StaticResource PhoneBg}">
+    <Grid x:Name="PhoneRootGrid" Background="{StaticResource PhoneBg}">
         <!-- HOME PAGE -->
         <Grid x:Name="HomePageView" Visibility="Visible">
             <Grid.RowDefinitions>

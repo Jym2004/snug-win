@@ -242,4 +242,22 @@ public sealed class ComprehensiveStateTests
         Assert.NotNull(second);
         Assert.Equal(MomentumPhase.Continue, second!.Value.Phase);
     }
+
+    [Theory]
+    [InlineData(1920, 1032, 1320, 2868)] // 1080p work area
+    [InlineData(2048, 1240, 1320, 2868)] // 2560x1600 @ 125%
+    [InlineData(1280, 680, 1080, 2400)]  // compact 720p screen
+    public void ScreenFit_ComputePreviewLayout_FitsWithinWorkAreaAcrossResolutions(
+        double workW,
+        double workH,
+        int phoneW,
+        int phoneH)
+    {
+        var fit = ScreenFit.FromPhone(new PhoneScreenSpecData(phoneW, phoneH));
+        var (designW, designH, scale) = ScreenFit.ComputePreviewLayout(new SizeD(workW, workH), fit);
+
+        Assert.InRange(scale, 0.35, 0.84);
+        Assert.True(designW * scale <= workW * 0.72 + 0.01);
+        Assert.True(designH * scale <= workH * 0.84 + 0.01);
+    }
 }

@@ -87,6 +87,16 @@ public sealed record ScreenFit : IEquatable<ScreenFit>
     public static double HomeBarHeight(double screenWidth) =>
         Math.Round(BaseHomeBarHeight * Scale(screenWidth), MidpointRounding.AwayFromZero);
 
+    public static (double DesignWidth, double DesignHeight, double Scale) ComputePreviewLayout(SizeD workAreaDip, ScreenFit fit)
+    {
+        var logical = fit.Size(fit.BaseWidth);
+        double maxW = Math.Max(300.0, workAreaDip.Width * 0.72);
+        double maxH = Math.Max(420.0, workAreaDip.Height * 0.84 - 48.0);
+        double scale = Math.Min(0.84, Math.Min(maxW / logical.Width, maxH / logical.Height));
+        scale = Math.Max(0.35, scale);
+        return (logical.Width, logical.Height, scale);
+    }
+
     public bool Equals(ScreenFit? other) =>
         other is not null && Ratio.Equals(other.Ratio) && BaseWidth == other.BaseWidth;
 

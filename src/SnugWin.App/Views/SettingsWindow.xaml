@@ -162,8 +162,12 @@
                                     </ComboBox>
                                 </StackPanel>
                             </StackPanel>
-                            <Button Grid.Column="1" Content="更换机型 / 自定义..." Style="{StaticResource PrimaryButton}"
-                                    VerticalAlignment="Top" Click="OnOpenModels"/>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top">
+                                <Button Content="预览手机界面" Style="{StaticResource SecondaryButton}"
+                                        Margin="0,0,8,0" Click="OnOpenPreview"/>
+                                <Button Content="更换机型 / 自定义..." Style="{StaticResource PrimaryButton}"
+                                        Click="OnOpenModels"/>
+                            </StackPanel>
                         </Grid>
                     </Border>
                 </StackPanel>

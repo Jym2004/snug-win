@@ -104,6 +104,10 @@ public partial class App : System.Windows.Application
         openSettings.Click += (_, _) => Dispatcher.Invoke(() => ShowSettings(0));
         menu.Items.Add(openSettings);
 
+        var openPreview = new System.Windows.Forms.ToolStripMenuItem("预览手机界面...");
+        openPreview.Click += (_, _) => Dispatcher.Invoke(() => _controller?.OpenPhonePreview());
+        menu.Items.Add(openPreview);
+
         _updateMenuItem = new System.Windows.Forms.ToolStripMenuItem("检查更新...");
         _updateMenuItem.Click += (_, _) => Dispatcher.Invoke(() => ShowSettings(3));
         menu.Items.Add(_updateMenuItem);

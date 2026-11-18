@@ -159,6 +159,7 @@ public partial class PhoneHomeWindow : Window
     }
 
     private readonly AppController _controller;
+    private readonly bool _previewMode;
     private SubPage _subPage = SubPage.None;
     private bool _showAllTab;
     private bool _confirmDismiss;
@@ -173,12 +174,33 @@ public partial class PhoneHomeWindow : Window
 
     public bool AcceptsKeys => _subPage != SubPage.None;
 
-    public PhoneHomeWindow(AppController controller)
+    public PhoneHomeWindow(AppController controller, bool previewMode = false)
     {
         InitializeComponent();
         _controller = controller;
+        _previewMode = previewMode;
+        if (_previewMode)
+        {
+            WindowStyle = WindowStyle.SingleBorderWindow;
+            ResizeMode = ResizeMode.CanMinimize;
+            ShowInTaskbar = true;
+            Topmost = false;
+            SizeToContent = SizeToContent.WidthAndHeight;
+            WindowStartupLocation = WindowStartupLocation.CenterScreen;
+            WindowPlacementHelper.ApplyModernDarkChrome(this);
+        }
         _controller.UiStateChanged += () => Dispatcher.BeginInvoke(SyncState);
         UpdateTabStyles();
+    }
+
+    public void ApplyPreviewLayout(SizeD workAreaDip, ScreenFit fit, PhoneChoice phone)
+    {
+        if (!_previewMode) return;
+        var (designW, designH, scale) = ScreenFit.ComputePreviewLayout(workAreaDip, fit);
+        PhoneRootGrid.Width = designW;
+        PhoneRootGrid.Height = designH;
+        PhoneRootGrid.LayoutTransform = new ScaleTransform(scale, scale);
+        Title = $"SnugWin 预览 — {phone.Model ?? "自定义"} ({phone.Screen.Width} × {phone.Screen.Height})";
     }
 
     public void CloseSubPage()
@@ -233,8 +255,23 @@ public partial class PhoneHomeWindow : Window
         UpdateBusyOverlay(st);
         UpdatePageVisibility();
         RefreshRunningAndAll();
-        if (_subPage == SubPage.Search) RefreshSearchPage();
-        else if (_subPage == SubPage.PhoneModel) RefreshModelPage();
+        if (_subPage == SubPage.Search)
+        {
+            RefreshSearchPage();
+        }
+        else if (_subPage == SubPage.PhoneModel)
+        {
+            RefreshModelPage();
+        }
+    }
+
+    private void ShowPreviewReadOnlyNotice()
+    {
+        NoticeBanner.Visibility = Visibility.Visible;
+        NoticeHeadline.Text = "本地预览模式";
+        NoticeDetail.Text = "仅演示 App 资源库、拼音搜索与机型比例，不会移动或关闭桌面窗口；连入 UU 后即可实战操控。";
+        NoticeActionsRow.Visibility = Visibility.Collapsed;
+        NoticeCloseBtn.Visibility = Visibility.Visible;
     }
 
     private void ClearConfirmations()
@@ -623,7 +660,13 @@ public partial class PhoneHomeWindow : Window
     private void OnPutBack(object sender, RoutedEventArgs e) => _controller.PutBack();
     private void OnZoomIn(object sender, RoutedEventArgs e) => _controller.ZoomBy(1);
     private void OnZoomOut(object sender, RoutedEventArgs e) => _controller.ZoomBy(-1);
-    private void OnDismissNotice(object sender, RoutedEventArgs e) => _controller.DismissNotice();
+    private void OnDismissNotice(object sender, RoutedEventArgs e)
+    {
+        if (_previewMode)
+            NoticeBanner.Visibility = Visibility.Collapsed;
+        else
+            _controller.DismissNotice();
+    }
 
     private void OnForceQuitFromNotice(object sender, RoutedEventArgs e)
     {
@@ -633,6 +676,11 @@ public partial class PhoneHomeWindow : Window
 
     private void OnAskDismissScreen(object sender, RoutedEventArgs e)
     {
+        if (_previewMode)
+        {
+            Close();
+            return;
+        }
         ClearConfirmations();
         _confirmDismiss = true;
         HomeScroll.ScrollToTop();
@@ -653,6 +701,7 @@ public partial class PhoneHomeWindow : Window
 
     private void OnAppHeaderClick(object sender, RoutedEventArgs e)
     {
+        if (_previewMode) { ShowPreviewReadOnlyNotice(); return; }
         if (sender is System.Windows.Controls.Button { Tag: RunningApp ra })
         {
             ClearConfirmations();
@@ -662,6 +711,7 @@ public partial class PhoneHomeWindow : Window
 
     private void OnPullWindow(object sender, RoutedEventArgs e)
     {
+        if (_previewMode) { ShowPreviewReadOnlyNotice(); return; }
         if (sender is System.Windows.Controls.Button { Tag: WindowInfo w })
         {
             ClearConfirmations();
@@ -671,6 +721,7 @@ public partial class PhoneHomeWindow : Window
 
     private void OnNewWindow(object sender, RoutedEventArgs e)
     {
+        if (_previewMode) { ShowPreviewReadOnlyNotice(); return; }
         if (sender is System.Windows.Controls.Button { Tag: RunningApp ra })
         {
             ClearConfirmations();
@@ -680,6 +731,7 @@ public partial class PhoneHomeWindow : Window
 
     private void OnAskQuitApp(object sender, RoutedEventArgs e)
     {
+        if (_previewMode) { ShowPreviewReadOnlyNotice(); return; }
         if (sender is System.Windows.Controls.Button { Tag: RunningAppVm vm })
         {
             ClearConfirmations();
@@ -699,6 +751,7 @@ public partial class PhoneHomeWindow : Window
 
     private void OnAskCloseWindow(object sender, RoutedEventArgs e)
     {
+        if (_previewMode) { ShowPreviewReadOnlyNotice(); return; }
         if (sender is System.Windows.Controls.Button { Tag: WindowVm vm })
         {
             ClearConfirmations();
@@ -718,6 +771,7 @@ public partial class PhoneHomeWindow : Window
 
     private void OnOpenApp(object sender, RoutedEventArgs e)
     {
+        if (_previewMode) { ShowPreviewReadOnlyNotice(); return; }
         if (sender is System.Windows.Controls.Button { Tag: AppInfo app })
         {
             ClearConfirmations();
@@ -727,6 +781,12 @@ public partial class PhoneHomeWindow : Window
 
     private void OnSearchOpenApp(object sender, RoutedEventArgs e)
     {
+        if (_previewMode)
+        {
+            CloseSubPage();
+            ShowPreviewReadOnlyNotice();
+            return;
+        }
         if (sender is System.Windows.Controls.Button { Tag: AppInfo app })
         {
             CloseSubPage();
@@ -737,6 +797,12 @@ public partial class PhoneHomeWindow : Window
 
     private void OnSearchPullWindow(object sender, RoutedEventArgs e)
     {
+        if (_previewMode)
+        {
+            CloseSubPage();
+            ShowPreviewReadOnlyNotice();
+            return;
+        }
         if (sender is System.Windows.Controls.Button { Tag: WindowInfo w })
         {
             CloseSubPage();
