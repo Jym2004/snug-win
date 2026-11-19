@@ -20,7 +20,9 @@ public sealed class PhoneDisplayService : IPhoneDisplays, IAsyncDisposable
     private readonly Func<bool> _isPipeAvailable;
     private readonly Func<IReadOnlyList<MonitorSnapshot>> _getActiveMonitors;
     private readonly Func<int, int, int, int, bool> _tryAttachVirtual;
+    private readonly Func<string, int, int, int, int, bool> _tryAttachNamed;
     private readonly TimeSpan _onlineTimeout;
+    private readonly HashSet<string> _startupPhysicalDevices;
     private readonly Dictionary<uint, ScreenFit> _fits = new();
     private readonly Dictionary<uint, string> _deviceNames = new();
 
@@ -41,7 +43,8 @@ public sealed class PhoneDisplayService : IPhoneDisplays, IAsyncDisposable
         Func<bool> isPipeAvailable,
         Func<IReadOnlyList<MonitorSnapshot>> getActiveMonitors,
         Func<int, int, int, int, bool>? tryAttachVirtual = null,
-        TimeSpan? onlineTimeout = null)
+        TimeSpan? onlineTimeout = null,
+        Func<string, int, int, int, int, bool>? tryAttachNamed = null)
     {
         _ipc = ipc;
         if (paths is not null)
@@ -49,7 +52,16 @@ public sealed class PhoneDisplayService : IPhoneDisplays, IAsyncDisposable
         _isPipeAvailable = isPipeAvailable;
         _getActiveMonitors = getActiveMonitors;
         _tryAttachVirtual = tryAttachVirtual ?? ((w, h, x, y) => DisplayConfigService.TryAttachVirtualDisplay(w, h, x, y, out _));
+        _tryAttachNamed = tryAttachNamed ?? ((name, w, h, x, y) => DisplayConfigService.TryAttachVirtualDisplay(name, w, h, x, y));
         _onlineTimeout = onlineTimeout ?? OnlineTimeout;
+        // Baseline of real monitors at startup: UU's super-screen detaches them, which is the
+        // signal that tells us not to fight the topology. A headless host has no baseline, so
+        // it must keep the old "unknown = create phone screen" behaviour.
+        var baseline = _getActiveMonitors();
+        _startupPhysicalDevices = baseline
+            .Where(m => !IsVirtualDisplayName(m.DeviceString))
+            .Select(m => m.DeviceName)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
     public async Task CleanupOrphansAsync(CancellationToken ct = default)
@@ -242,11 +254,72 @@ public sealed class PhoneDisplayService : IPhoneDisplays, IAsyncDisposable
         }
     }
 
+    private static bool IsVirtualDisplayName(string name) =>
+        name.Contains("Virtual", StringComparison.OrdinalIgnoreCase)
+        || name.Contains("VirtuDisplay", StringComparison.OrdinalIgnoreCase);
+
     public bool IsOnline(uint displayId)
     {
         if (!_deviceNames.TryGetValue(displayId, out var devName)) return false;
-        return DisplayConfigService.GetActiveMonitors()
+        return _getActiveMonitors()
             .Any(m => m.DeviceName.Equals(devName, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// True only when UU's own virtual display is active AND every real monitor present at
+    /// startup has been detached (UU 超级屏). SnugWin then waits instead of re-adding screens.
+    /// </summary>
+    public bool IsRemoteExclusiveDisplayActive()
+    {
+        if (_startupPhysicalDevices.Count == 0) return false;
+        var active = _getActiveMonitors();
+        bool uuActive = active.Any(m =>
+            m.DeviceString.Contains("GameViewer Virtual Display Adapter", StringComparison.OrdinalIgnoreCase));
+        bool realStillHere = active.Any(m => !IsVirtualDisplayName(m.DeviceString));
+        bool startupDisplaysGone = _startupPhysicalDevices.All(name =>
+            active.All(m => !m.DeviceName.Equals(name, StringComparison.OrdinalIgnoreCase)));
+        return uuActive && !realStillHere && startupDisplaysGone;
+    }
+
+    /// <summary>
+    /// Re-attach one already-bound SnugWin display after a topology change. Uses the exact
+    /// device name it was created on; never enumerates "any free virtual display", which would
+    /// steal another desk's screen in the multi-screen setup.
+    /// </summary>
+    public async Task<bool> TryReactivateAsync(uint displayId, int width, CancellationToken ct = default)
+    {
+        if (!_deviceNames.TryGetValue(displayId, out var deviceName)) return false;
+        if (!_fits.TryGetValue(displayId, out var fit)) return false;
+        if (IsRemoteExclusiveDisplayActive()) return false;
+
+        int requestedWidth = fit.Widths.Contains(width) ? width : fit.BaseWidth;
+        var modes = BuildModes(fit);
+        try
+        {
+            await _ipc.NotifyAsync([new VddMonitor(displayId, PhoneScreenSpec.Name, true, modes)], ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"虚拟屏 #{displayId} 恢复 Notify 失败：{ex.Message}");
+            return false;
+        }
+
+        var (pxW, pxH) = fit.PixelSize(requestedWidth);
+        var active = _getActiveMonitors();
+        int rightEdge = active.Count > 0 ? (int)active.Max(m => m.Bounds.MaxX) : 2560;
+        var sw = Stopwatch.StartNew();
+        while (sw.Elapsed < _onlineTimeout && !ct.IsCancellationRequested)
+        {
+            if (IsOnline(displayId))
+            {
+                await SetWidthAsync(displayId, requestedWidth, ct).ConfigureAwait(false);
+                return true;
+            }
+            _tryAttachNamed(deviceName, pxW, pxH, rightEdge, 0);
+            await Task.Delay(150, ct).ConfigureAwait(false);
+        }
+        return IsOnline(displayId);
     }
 
     public int? WidthOf(uint displayId)

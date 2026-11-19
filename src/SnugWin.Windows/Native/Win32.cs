@@ -25,9 +25,12 @@ public static unsafe partial class Win32
 
     public const uint SWP_NOZORDER = 0x0004;
     public const uint SWP_NOACTIVATE = 0x0010;
+    public const uint SWP_NOSIZE = 0x0001;
     public const uint SWP_ASYNCWINDOWPOS = 0x4000;
     public const int HWND_TOP = 0;
 
+    public const int SW_HIDE = 0;
+    public const int SW_SHOWNOACTIVATE = 4;
     public const int SW_RESTORE = 9;
     public const int SW_MINIMIZE = 6;
     public const int SW_SHOW = 5;

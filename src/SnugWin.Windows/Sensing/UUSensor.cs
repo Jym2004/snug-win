@@ -20,32 +20,32 @@ namespace SnugWin.Windows.Sensing;
 /// </summary>
 public sealed class UUSensor
 {
+    private static readonly TimeSpan WakeInterval = TimeSpan.FromSeconds(10);
+
     private readonly StreamLogActivityTracker _streamLog = new();
     private int _lastServerPid;
     private string? _resolvedLogDir;
     private bool _loggedLogReadError;
+    private DateTimeOffset _lastWakeAttempt = DateTimeOffset.MinValue;
+    private bool _loggedWakeSuccess;
 
     public bool ManualOverride { get; set; }
     public bool LastPeerTcpObserved { get; private set; }
 
     public UUSignals Sample(DateTimeOffset now)
     {
-        if (ManualOverride)
-        {
-            return new UUSignals(
-                OverlayVisible: true,
-                Controllers: ControllerTable.FromNames("手动开启 (Phone)"),
-                CaptureActive: true);
-        }
-
         int? serverPid = FindProcessPid("GameViewerServer");
         int? clientPid = FindProcessPid("GameViewer");
 
         bool overlayVisible = serverPid is { } sp && HasVisibleWindow(sp);
-        var controllers = clientPid is { } cp ? ReadControllers(cp) : ControllerTable.Unreadable;
         bool? captureActive = SampleCaptureActive(serverPid, now);
+        bool sessionActive = overlayVisible || captureActive == true;
 
-        return new UUSignals(overlayVisible, controllers, captureActive);
+        var controllers = clientPid is { } cp
+            ? ReadControllers(cp, sessionActive, now)
+            : ControllerTable.Unreadable;
+
+        return new UUSignals(overlayVisible, controllers, captureActive) { ManualOverride = ManualOverride };
     }
 
     private static int? FindProcessPid(string processName)
@@ -79,20 +79,49 @@ public sealed class UUSensor
         return found;
     }
 
-    private static ControllerTable ReadControllers(int clientPid)
+    private ControllerTable ReadControllers(int clientPid, bool sessionActive, DateTimeOffset now)
     {
         var hwnds = new List<IntPtr>();
+        var hiddenHome = new List<IntPtr>();
         Win32.EnumWindows((hwnd, _) =>
         {
-            if (!Win32.IsWindowVisible(hwnd)) return true;
             Win32.GetWindowThreadProcessId(hwnd, out int wPid);
             if (wPid != clientPid) return true;
+            // Native Qt class names differ from the UIA ones; hidden candidates are still
+            // passed through because UU keeps its controller panel in a hidden main window.
+            if (!Win32.IsWindowVisible(hwnd))
+            {
+                string nativeClass = Win32.GetWindowClass(hwnd);
+                if (!nativeClass.StartsWith("Qt", StringComparison.Ordinal)
+                    || !nativeClass.EndsWith("QWindowIcon", StringComparison.Ordinal)) return true;
+                hiddenHome.Add(hwnd);
+            }
             hwnds.Add(hwnd);
             return true;
         }, IntPtr.Zero);
 
         if (hwnds.Count == 0) return ControllerTable.Unreadable;
-        return UiaHelper.ReadGameViewerControllers(hwnds);
+        var table = UiaHelper.ReadGameViewerControllers(hwnds);
+        if (table.Names.Count > 0) return table;
+
+        // Empty tree usually means Qt never rendered the panel. Wake once per interval so a
+        // genuinely controller-less session does not flicker the UU window continuously.
+        if (!sessionActive || hiddenHome.Count == 0) return table;
+        if (now - _lastWakeAttempt < WakeInterval) return table;
+        _lastWakeAttempt = now;
+
+        foreach (var hwnd in hiddenHome)
+        {
+            if (!UiaHelper.TryWakeAndRead(hwnd, out var woken)) continue;
+            if (woken.Names.Count == 0) continue;
+            if (!_loggedWakeSuccess)
+            {
+                _loggedWakeSuccess = true;
+                Log.Info("UU 主窗未显示，已离屏唤醒并读到控制端");
+            }
+            return woken;
+        }
+        return table;
     }
 
     private bool? SampleCaptureActive(int? serverPid, DateTimeOffset now)

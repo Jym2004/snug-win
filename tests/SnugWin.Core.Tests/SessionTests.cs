@@ -58,6 +58,50 @@ public sealed class SessionTests
     }
 
     [Fact]
+    public void ConnectionTracker_DropsStalePhoneWhenReadableControllerBecomesDesktop()
+    {
+        var tracker = new ConnectionTracker();
+        var t0 = DateTimeOffset.UtcNow;
+        tracker.Update(new UUSignals(true, ControllerTable.FromNames("Phone A"), true), t0);
+
+        // Unreadable sample must not erase what we already know.
+        Assert.Null(tracker.Update(new UUSignals(true, ControllerTable.Unreadable, true), t0.AddSeconds(1)));
+        Assert.Equal(new[] { "Phone A" }, tracker.Controllers);
+
+        var change = tracker.Update(
+            new UUSignals(true, ControllerTable.FromNames("Office-Laptop"), true), t0.AddSeconds(2));
+
+        Assert.IsType<ConnectionEvent.ControllersChanged>(change);
+        Assert.False(ControllerClassifier.WantsPhoneScreen(tracker.Controllers));
+    }
+
+    [Fact]
+    public void ControllerTableParser_ReadsQtControlledPanel()
+    {
+        var panel = UuElement.ControlledPanelNode([
+            UuElement.TextNode("本机被控中"),
+            UuElement.RowNode([
+                UuElement.TextNode("Sample-Book"),
+                UuElement.TextNode("远程控制"),
+                UuElement.TextNode("连接时长 00:15")
+            ])
+        ]);
+
+        var parsed = ControllerTableParser.ParseWindows([panel]);
+
+        Assert.Equal(["Sample-Book"], parsed.Names);
+        Assert.Equal(ControllerKind.Desktop, ControllerClassifier.Classify(parsed.Names[0]));
+    }
+
+    [Fact]
+    public void ControllerClassifier_TreatsLaptopBrandNamesAsDesktop()
+    {
+        Assert.Equal(ControllerKind.Desktop, ControllerClassifier.Classify("Sample-Book 16"));
+        Assert.Equal(ControllerKind.Desktop, ControllerClassifier.Classify("My MacBook Pro"));
+        Assert.Equal(ControllerKind.Phone, ControllerClassifier.Classify("Pixel 9"));
+    }
+
+    [Fact]
     public void ControllerClassifier_DistinguishesPhoneAndDesktop()
     {
         Assert.Equal(ControllerKind.Phone, ControllerClassifier.Classify("iPhone 16 Pro"));

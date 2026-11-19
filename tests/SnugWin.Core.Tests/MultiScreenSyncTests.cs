@@ -29,6 +29,24 @@ public sealed class MultiScreenSyncTests : IDisposable
     }
 
     [Fact]
+    public void ForController_KeepsOnlyScreensThatMatchTheControllerKind()
+    {
+        var touch = new ScreenWish("t", "Phone", PhoneChoice.Standard, ScreenOrientation.Portrait,
+            ScreenFit.Standard, ScreenBehavior.TouchScreen);
+        var computer = new ScreenWish("c", "Laptop", PhoneChoice.Standard, ScreenOrientation.Landscape,
+            ScreenFit.Standard, ScreenBehavior.Computer);
+
+        var forPhone = ScreenPlan.ForController([touch, computer], wantsTouch: true);
+        Assert.Equal(["t"], forPhone.Select(w => w.Id));
+
+        var forDesktop = ScreenPlan.ForController([touch, computer], wantsTouch: false);
+        Assert.Equal(["c"], forDesktop.Select(w => w.Id));
+
+        // A single-kind config must never be filtered into nothing.
+        Assert.Single(ScreenPlan.ForController([touch], wantsTouch: false));
+    }
+
+    [Fact]
     public void PhoneCatalog_LoadsUpstreamDeviceModelsJson_HasPhoneTabletComputer()
     {
         string path = Path.Combine(AppContext.BaseDirectory, "Assets", "device-models.json");

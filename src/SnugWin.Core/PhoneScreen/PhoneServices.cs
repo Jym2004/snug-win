@@ -16,6 +16,8 @@ public interface IPhoneDisplays
     ScreenFit? FitOf(uint displayId);
     Task<bool> RetireAsync(uint displayId, CancellationToken ct = default);
     bool IsOnline(uint displayId);
+    Task<bool> TryReactivateAsync(uint displayId, int width, CancellationToken ct = default) => Task.FromResult(false);
+    bool IsRemoteExclusiveDisplayActive() => false;
     int? WidthOf(uint displayId);
     Task SetWidthAsync(uint displayId, int width, CancellationToken ct = default);
     RectD? BoundsOf(uint displayId);

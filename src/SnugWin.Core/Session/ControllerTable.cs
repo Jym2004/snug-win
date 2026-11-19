@@ -9,6 +9,7 @@ public enum UuElementKind
     Text,
     Table,
     Row,
+    ControlledPanel,
     Other
 }
 
@@ -17,6 +18,7 @@ public sealed record UuElement(UuElementKind Kind, string? Text, IReadOnlyList<U
     public static UuElement TextNode(string text) => new(UuElementKind.Text, text, Array.Empty<UuElement>());
     public static UuElement TableNode(IReadOnlyList<UuElement> children) => new(UuElementKind.Table, null, children);
     public static UuElement RowNode(IReadOnlyList<UuElement> children) => new(UuElementKind.Row, null, children);
+    public static UuElement ControlledPanelNode(IReadOnlyList<UuElement> children) => new(UuElementKind.ControlledPanel, null, children);
     public static UuElement OtherNode(IReadOnlyList<UuElement> children) => new(UuElementKind.Other, null, children);
 
     internal IEnumerable<UuElement> Rows()
@@ -86,9 +88,16 @@ public static class ControllerTableParser
         bool hasHeader = element.Children.Any(c => c.Kind == UuElementKind.Text && string.Equals(c.Text, PageTitle, StringComparison.Ordinal));
         if (hasHeader)
         {
+            // Windows UU uses a Qt group (ControllerInfoView) with controller widgets
+            // instead of a Table, so accept both shapes under the "本机被控中" header.
+            if (element.Kind == UuElementKind.ControlledPanel)
+            {
+                yield return element;
+                yield break;
+            }
             foreach (var child in element.Children)
             {
-                if (child.Kind == UuElementKind.Table)
+                if (child.Kind is UuElementKind.Table or UuElementKind.ControlledPanel)
                     yield return child;
             }
         }

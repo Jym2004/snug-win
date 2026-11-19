@@ -121,45 +121,68 @@ public static unsafe class DisplayConfigService
         {
             string devName = new string(dd.DeviceName).TrimEnd('\0');
             string devStr = new string(dd.DeviceString).TrimEnd('\0');
+            string devId = new string(dd.DeviceID).TrimEnd('\0');
+            // Only SnugWin's own virtual-display driver is a valid target: UU / Todesk /
+            // Duet / usbmmidd adapters must never be reused for the phone screen.
             if (!devStr.Contains("Virtual Display", StringComparison.OrdinalIgnoreCase)) continue;
+            if (!devId.Contains(@"Root\VirtualDisplayDriver", StringComparison.OrdinalIgnoreCase)) continue;
             if ((dd.StateFlags & Win32.DISPLAY_DEVICE_ACTIVE) != 0) continue;
-
-            var mon = new Win32.DISPLAY_DEVICE { cb = (uint)Marshal.SizeOf<Win32.DISPLAY_DEVICE>() };
-            if (!Win32.EnumDisplayDevicesW(devName, 0, ref mon, 0)) continue;
-
-            string monStr = new string(mon.DeviceString).TrimEnd('\0');
-            Log.Info($"发现已到达但未启用的虚拟屏：{devName} ({monStr}, flags=0x{mon.StateFlags:X})，尝试扩展桌面...");
-
-            var dm = new Win32.DEVMODE
-            {
-                dmSize = (ushort)Marshal.SizeOf<Win32.DEVMODE>(),
-                dmFields = Win32.DM_POSITION | Win32.DM_PELSWIDTH | Win32.DM_PELSHEIGHT | Win32.DM_BITSPERPEL | Win32.DM_DISPLAYFREQUENCY,
-                dmPositionX = posX,
-                dmPositionY = posY,
-                dmBitsPerPel = 32,
-                dmPelsWidth = (uint)pixelWidth,
-                dmPelsHeight = (uint)pixelHeight,
-                dmDisplayFrequency = 60
-            };
-
-            int r1 = Win32.ChangeDisplaySettingsExW(devName, ref dm, IntPtr.Zero, Win32.CDS_UPDATEREGISTRY | Win32.CDS_NORESET, IntPtr.Zero);
-            int r2 = Win32.ChangeDisplaySettingsExW(null, IntPtr.Zero, IntPtr.Zero, 0, IntPtr.Zero);
-            Log.Info($"ChangeDisplaySettingsEx({devName}, {pixelWidth}x{pixelHeight}) => r1={r1}, r2={r2}");
-            if (r1 == Win32.DISP_CHANGE_SUCCESSFUL && r2 == Win32.DISP_CHANGE_SUCCESSFUL)
-            {
-                attachedDeviceName = devName;
-                return true;
-            }
-
-            int sdc = Win32.SetDisplayConfig(0, IntPtr.Zero, 0, IntPtr.Zero, Win32.SDC_APPLY | Win32.SDC_TOPOLOGY_EXTEND);
-            Log.Info($"SetDisplayConfig(SDC_TOPOLOGY_EXTEND) => {sdc}");
-            if (sdc == 0)
+            if (TryAttachVirtualDisplay(devName, pixelWidth, pixelHeight, posX, posY))
             {
                 attachedDeviceName = devName;
                 return true;
             }
         }
         return false;
+    }
+
+    /// <summary>
+    /// Re-enable one specific, already-bound SnugWin display. Deliberately avoids
+    /// SDC_TOPOLOGY_EXTEND: while UU's super-screen owns the topology a global extend would
+    /// re-shuffle every monitor instead of restoring just this device.
+    /// </summary>
+    public static bool TryAttachVirtualDisplay(string deviceName, int pixelWidth, int pixelHeight, int posX, int posY)
+    {
+        var dd = new Win32.DISPLAY_DEVICE { cb = (uint)Marshal.SizeOf<Win32.DISPLAY_DEVICE>() };
+        uint i = 0;
+        bool found = false;
+        while (Win32.EnumDisplayDevicesW(null, i++, ref dd, 0))
+        {
+            if (!new string(dd.DeviceName).TrimEnd('\0').Equals(deviceName, StringComparison.OrdinalIgnoreCase))
+                continue;
+            found = true;
+            break;
+        }
+        if (!found) return false;
+
+        string devStr = new string(dd.DeviceString).TrimEnd('\0');
+        string devId = new string(dd.DeviceID).TrimEnd('\0');
+        if (!devStr.Contains("Virtual Display", StringComparison.OrdinalIgnoreCase)
+            || !devId.Contains(@"Root\VirtualDisplayDriver", StringComparison.OrdinalIgnoreCase))
+            return false;
+        if ((dd.StateFlags & Win32.DISPLAY_DEVICE_ACTIVE) != 0) return true;
+
+        var mon = new Win32.DISPLAY_DEVICE { cb = (uint)Marshal.SizeOf<Win32.DISPLAY_DEVICE>() };
+        if (!Win32.EnumDisplayDevicesW(deviceName, 0, ref mon, 0)) return false;
+        string monStr = new string(mon.DeviceString).TrimEnd('\0');
+        Log.Info($"发现已到达但未启用的虚拟屏：{deviceName} ({monStr}, flags=0x{mon.StateFlags:X})，按原设备恢复...");
+
+        var dm = new Win32.DEVMODE
+        {
+            dmSize = (ushort)Marshal.SizeOf<Win32.DEVMODE>(),
+            dmFields = Win32.DM_POSITION | Win32.DM_PELSWIDTH | Win32.DM_PELSHEIGHT | Win32.DM_BITSPERPEL | Win32.DM_DISPLAYFREQUENCY,
+            dmPositionX = posX,
+            dmPositionY = posY,
+            dmBitsPerPel = 32,
+            dmPelsWidth = (uint)pixelWidth,
+            dmPelsHeight = (uint)pixelHeight,
+            dmDisplayFrequency = 60
+        };
+
+        int r1 = Win32.ChangeDisplaySettingsExW(deviceName, ref dm, IntPtr.Zero, Win32.CDS_UPDATEREGISTRY | Win32.CDS_NORESET, IntPtr.Zero);
+        int r2 = Win32.ChangeDisplaySettingsExW(null, IntPtr.Zero, IntPtr.Zero, 0, IntPtr.Zero);
+        Log.Info($"ChangeDisplaySettingsEx({deviceName}, {pixelWidth}x{pixelHeight}) => r1={r1}, r2={r2}");
+        return r1 == Win32.DISP_CHANGE_SUCCESSFUL && r2 == Win32.DISP_CHANGE_SUCCESSFUL;
     }
 
     public static bool HasDisplayMode(string deviceName, int pixelWidth, int pixelHeight)

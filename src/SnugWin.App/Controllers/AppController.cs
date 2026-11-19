@@ -219,7 +219,9 @@ public sealed class AppController : ILogSink
             if (ended) _desks.SetWishes([]);
 
             bool remote = _session.InEpisode || _sensor.ManualOverride;
-            _desks.SetWishes(ScreenPlan.Wishes(_config, remote));
+            bool wantsTouch = signals.ManualOverride
+                              || ControllerClassifier.WantsPhoneScreen(_session.EpisodeControllers(now));
+            _desks.SetWishes(ScreenPlan.ForController(ScreenPlan.Wishes(_config, remote), wantsTouch));
             _desks.SetRemote(_session.InEpisode);
 
             if ((now - _lastVerifyAt).TotalSeconds >= 2.0)
@@ -1089,6 +1091,9 @@ public sealed class AppController : ILogSink
             return "正在创建虚拟屏...";
         if (_desks.Wishes.Any(w => _desks.StateOf(w.Id)?.ScreenPhase == PhoneScreenPhase.Failed))
             return "建屏失败（重试中）";
+        int suspendedCount = _desks.Wishes.Count(w => _desks.StateOf(w.Id)?.ScreenPhase == PhoneScreenPhase.Suspended);
+        if (suspendedCount > 0)
+            return $"远程中（{suspendedCount} 块屏等待显示布局恢复）";
         if (_desks.HasAnyDismissedTouch && _session.InEpisode)
             return "远程中（已退出触屏）";
         return _session.IsConnected ? "远程中" : "待机中";
