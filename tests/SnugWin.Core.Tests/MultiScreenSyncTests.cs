@@ -42,8 +42,11 @@ public sealed class MultiScreenSyncTests : IDisposable
         var forDesktop = ScreenPlan.ForController([touch, computer], wantsTouch: false);
         Assert.Equal(["c"], forDesktop.Select(w => w.Id));
 
-        // A single-kind config must never be filtered into nothing.
-        Assert.Single(ScreenPlan.ForController([touch], wantsTouch: false));
+        // Do not leak a phone screen to a desktop controller when only phone screens are configured.
+        Assert.Empty(ScreenPlan.ForController([touch], wantsTouch: false));
+        Assert.Single(ScreenPlan.ForController([touch], wantsTouch: true));
+        Assert.Single(ScreenPlan.ForController([computer], wantsTouch: false));
+        Assert.Empty(ScreenPlan.ForController([computer], wantsTouch: true));
     }
 
     [Fact]

@@ -30,15 +30,15 @@ public static class ScreenPlan
         ScreenFit.FromDevice(screen.Device.Screen, screen.Device.Kind, screen.Orientation);
 
     /// <summary>
-    /// Keep only the screens that suit the current controller: touch devices (phone/tablet)
-    /// get the touch screens, desktop controllers get the computer screens. When the config
-    /// only holds one kind, keep it as-is so a single-screen setup never goes blank.
+    /// Keep only the screens that suit the current controller. Do not fall back to another
+    /// screen kind: a computer must not receive a phone touch screen just because no computer
+    /// screen was configured (and vice versa). Unknown controllers are already classified by
+    /// the caller as touch-capable before reaching this method.
     /// </summary>
     public static IReadOnlyList<ScreenWish> ForController(IReadOnlyList<ScreenWish> wishes, bool wantsTouch)
     {
         if (wishes.Count == 0) return wishes;
-        var matched = wishes.Where(w => w.IsTouch == wantsTouch).ToList();
-        return matched.Count > 0 ? matched : wishes;
+        return wishes.Where(w => w.IsTouch == wantsTouch).ToList();
     }
 
     public static IReadOnlyList<ScreenWish> Wishes(AppConfig config, bool remote, bool preview = false)
