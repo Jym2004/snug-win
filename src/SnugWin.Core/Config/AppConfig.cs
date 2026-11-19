@@ -32,6 +32,7 @@ public sealed record AppConfig
     public AppThemeMode Theme { get; init; } = AppThemeMode.Light;
     public PhoneChoice Phone { get; init; } = PhoneChoice.Standard;
     public IReadOnlyList<ScreenConfig>? Screens { get; init; }
+    public string? MainScreen { get; init; }
     public bool Welcomed { get; init; } = false;
     public string? LastVersion { get; init; }
 
@@ -78,13 +79,19 @@ public sealed record AppConfig
         var legacyPhone = sanitizedScreens.FirstOrDefault(s =>
             s.Orientation == ScreenOrientation.Portrait && s.Device.Kind == DeviceKind.Phone);
 
+        string? mainScreen = !string.IsNullOrWhiteSpace(MainScreen)
+            && sanitizedScreens.Any(s => string.Equals(s.Id, MainScreen, StringComparison.OrdinalIgnoreCase) && s.Enabled)
+            ? sanitizedScreens.First(s => string.Equals(s.Id, MainScreen, StringComparison.OrdinalIgnoreCase)).Id
+            : null;
+
         return this with
         {
             ZoomSteps = ZoomSteps.Clamp(MinZoomSteps, MaxZoomSteps),
             Theme = theme,
             Phone = legacyPhone?.Device ?? phone,
             PhoneScreen = legacyPhone?.Enabled ?? sanitizedScreens.Any(s => s.Enabled),
-            Screens = sanitizedScreens
+            Screens = sanitizedScreens,
+            MainScreen = mainScreen
         };
     }
 
@@ -108,8 +115,12 @@ public sealed record AppConfig
     public AppConfig WithScreenRemoved(string id)
     {
         var list = EffectiveScreens().Where(s => !string.Equals(s.Id, id, StringComparison.OrdinalIgnoreCase)).ToList();
-        return (this with { Screens = list }).Sanitize();
+        string? main = string.Equals(MainScreen, id, StringComparison.OrdinalIgnoreCase) ? null : MainScreen;
+        return (this with { Screens = list, MainScreen = main }).Sanitize();
     }
+
+    public AppConfig WithMainScreen(string? screenId) =>
+        (this with { MainScreen = screenId }).Sanitize();
 
     public AppConfig WithScreenUpdated(string id, Func<ScreenConfig, ScreenConfig> update)
     {

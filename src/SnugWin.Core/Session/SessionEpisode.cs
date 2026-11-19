@@ -20,6 +20,7 @@ public sealed class SessionEpisode
     private DateTimeOffset _interruptedSince;
 
     public bool IsActive => _phase != Phase.Idle;
+    public bool IsInterrupted => _phase == Phase.Interrupted;
 
     public EpisodeChange Connected(DateTimeOffset now)
     {
@@ -45,6 +46,13 @@ public sealed class SessionEpisode
         _phase = Phase.Interrupted;
         _interruptedSince = now;
         return EpisodeChange.Interrupted;
+    }
+
+    public EpisodeChange? EndNow()
+    {
+        if (_phase != Phase.Interrupted) return null;
+        _phase = Phase.Idle;
+        return EpisodeChange.Ended;
     }
 
     public EpisodeChange? Advance(DateTimeOffset now)

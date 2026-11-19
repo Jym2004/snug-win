@@ -810,6 +810,26 @@ public sealed class PhoneDesk
         if (_displays.WindowAreaOf(id) is not { } area) return null;
         if (await _windows.MoveAsync(p.Window.Key, area) is not { } got) return null;
 
+        var bounds = _displays.BoundsOf(id) ?? area;
+        if (!OriginOnScreen(got, bounds) && _displays.MainArea() is { } mainArea)
+        {
+            Log.Info($"{p.Window.Label} 首次未能落到目标屏（实际 {got.Short}），经主屏中转再放");
+            var relay = new RectD(
+                mainArea.X + Math.Max(0, (mainArea.Width - Math.Min(mainArea.Width, area.Width)) / 2),
+                mainArea.Y + Math.Max(0, (mainArea.Height - Math.Min(mainArea.Height, area.Height)) / 2),
+                Math.Min(mainArea.Width, Math.Max(400, got.Width)),
+                Math.Min(mainArea.Height, Math.Max(300, got.Height)));
+            _ = await _windows.MoveAsync(p.Window.Key, relay);
+            if (await _windows.MoveAsync(p.Window.Key, area) is not { } retried) return null;
+            got = retried;
+        }
+
+        if (!OriginOnScreen(got, bounds))
+        {
+            Log.Info($"{p.Window.Label} 原点未能落到目标屏（实际 {got.Short}，目标 {bounds.Short}），放弃放置");
+            return null;
+        }
+
         p.Settled = got;
         p.Record.Filled = got;
         WriteRecord(p.Record);
@@ -836,6 +856,12 @@ public sealed class PhoneDesk
         p.Width = nextWidth;
         return await FillAsync(p, id);
     }
+
+    private static bool OriginOnScreen(RectD frame, RectD screenBounds) =>
+        frame.X >= screenBounds.MinX - 2.0
+        && frame.X < screenBounds.MaxX + 2.0
+        && frame.Y >= screenBounds.MinY - 2.0
+        && frame.Y < screenBounds.MaxY + 2.0;
 
     private async Task RevealAsync()
     {

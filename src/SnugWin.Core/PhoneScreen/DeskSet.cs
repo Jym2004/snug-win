@@ -128,9 +128,16 @@ public sealed class DeskSet
 
     public void SetRemote(bool on)
     {
+        bool wasRemote = _remote;
         _remote = on;
         foreach (var desk in _desks.Values)
             desk.SetRemote(on);
+        if (wasRemote && !on)
+        {
+            foreach (var desk in _desks.Values)
+                desk.DismissNotice();
+            SettleDisplays();
+        }
     }
 
     public void SetDefaultZoom(int steps)

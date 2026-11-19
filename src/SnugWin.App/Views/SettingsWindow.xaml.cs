@@ -65,6 +65,8 @@ public partial class SettingsWindow : Window
         string DeviceSummary,
         string StatusLabel,
         bool Enabled,
+        string MainActionLabel,
+        Visibility MainBadgeVisibility,
         Visibility ReadyBadgeVisibility,
         Visibility PreviewVisibility,
         Visibility DeleteVisibility);
@@ -136,6 +138,7 @@ public partial class SettingsWindow : Window
             }
 
             ElevationText.Text = _controller.IsElevated ? "管理员权限运行中" : "普通用户权限";
+            HeroEndNowBtn.Visibility = _controller.IsInReconnectGrace ? Visibility.Visible : Visibility.Collapsed;
             ElevateBtn.Visibility = _controller.IsElevated ? Visibility.Collapsed : Visibility.Visible;
             HeroReentryBtn.Visibility = _controller.CanReenterPhoneScreen ? Visibility.Visible : Visibility.Collapsed;
             HeroReadyBadge.Visibility = !_controller.CanReenterPhoneScreen && _controller.IsElevated
@@ -326,6 +329,7 @@ public partial class SettingsWindow : Window
                 PhoneScreenPhase.Failed => "异常",
                 _ => s.Enabled ? "待命" : "已停用"
             };
+            bool isMain = string.Equals(_controller.MainScreenId, s.Id, StringComparison.OrdinalIgnoreCase);
             rows.Add(new ScreenRowItem(
                 Id: s.Id,
                 Name: s.Name,
@@ -333,6 +337,8 @@ public partial class SettingsWindow : Window
                 DeviceSummary: summary,
                 StatusLabel: status,
                 Enabled: s.Enabled,
+                MainActionLabel: isMain ? "取消常驻" : "设为常驻",
+                MainBadgeVisibility: isMain ? Visibility.Visible : Visibility.Collapsed,
                 ReadyBadgeVisibility: state.ScreenPhase == PhoneScreenPhase.Ready ? Visibility.Visible : Visibility.Collapsed,
                 PreviewVisibility: s.Device.Kind.IsTouch() ? Visibility.Visible : Visibility.Collapsed,
                 DeleteVisibility: screens.Count > 1 ? Visibility.Visible : Visibility.Collapsed));
@@ -386,6 +392,27 @@ public partial class SettingsWindow : Window
     {
         if (sender is System.Windows.Controls.Button { Tag: string id })
             new PhoneModelWindow(_controller, id) { Owner = this }.ShowDialog();
+    }
+
+    private void OnEndSessionNowClick(object sender, RoutedEventArgs e) => _controller.EndSessionNow();
+
+    private void OnToggleMainScreenClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.Button { Tag: string id }) return;
+        bool isMain = string.Equals(_controller.MainScreenId, id, StringComparison.OrdinalIgnoreCase);
+        if (isMain)
+        {
+            _controller.SetMainScreen(null);
+            return;
+        }
+
+        var ans = System.Windows.MessageBox.Show(
+            "设为常驻屏后，该虚拟屏会在未连入远程时也保持在线，远程断开后屏上窗口原样保留，下次连入直接继续使用。\n\n确认将其设为常驻虚拟屏吗？",
+            "设为常驻虚拟屏",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+        if (ans == MessageBoxResult.Yes)
+            _controller.SetMainScreen(id);
     }
 
     private void OnDeleteScreenClick(object sender, RoutedEventArgs e)

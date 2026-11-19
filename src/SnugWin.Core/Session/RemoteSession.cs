@@ -25,6 +25,7 @@ public sealed class RemoteSession
     public bool IsConnected => Tracker.IsConnected;
     public IReadOnlyList<string> Controllers => Tracker.Controllers;
     public bool InEpisode => Episode.IsActive;
+    public bool IsInReconnectGrace => Episode.IsInterrupted;
 
     public IReadOnlyList<string> EpisodeControllers(DateTimeOffset now)
     {
@@ -75,6 +76,16 @@ public sealed class RemoteSession
         }
 
         return transitions;
+    }
+
+    public SessionTransition? EndNow()
+    {
+        if (Episode.EndNow() != EpisodeChange.Ended)
+            return null;
+        _group.Clear();
+        _departed.Clear();
+        EpisodeBeganAt = null;
+        return new SessionTransition.Ended();
     }
 
     public void NoteSelfInducedChange(DateTimeOffset now) => Tracker.NoteSelfInducedChange(now);

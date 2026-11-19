@@ -215,8 +215,10 @@ public sealed class AppController : ILogSink
             if (_shuttingDown) return;
 
             var transitions = _session.Update(signals, now);
+            bool interrupted = transitions.Any(t => t is SessionTransition.Interrupted);
             bool ended = transitions.Any(t => t is SessionTransition.Ended);
-            if (ended) _desks.SetWishes([]);
+            if (interrupted || ended)
+                BringCursorHome(includePersistentMain: true);
 
             bool remote = _session.InEpisode || _sensor.ManualOverride;
             _desks.SetWishes(ScreenPlan.Wishes(_config, remote));
@@ -230,7 +232,8 @@ public sealed class AppController : ILogSink
                 _desks.SettleDisplays();
             }
 
-            bool showAnyList = _desks.Wishes.Any(w =>
+            bool watching = remote || (_previewHomeWindow is { IsVisible: true });
+            bool showAnyList = watching && _desks.Wishes.Any(w =>
                 w.IsTouch
                 && _desks.StateOf(w.Id) is { ScreenPhase: PhoneScreenPhase.Ready } dst
                 && (dst.ListVisible || dst.Placed is null)
@@ -918,6 +921,60 @@ public sealed class AppController : ILogSink
         _configStore.Save(_config);
         OnTick();
         UiStateChanged?.Invoke();
+    }
+
+    public bool IsInReconnectGrace => _session.IsInReconnectGrace;
+    public string? MainScreenId => _config.MainScreen;
+
+    public void EndSessionNow()
+    {
+        if (_session.EndNow() is null) return;
+        BringCursorHome(includePersistentMain: true);
+        bool remote = _session.InEpisode || _sensor.ManualOverride;
+        _desks.SetWishes(ScreenPlan.Wishes(_config, remote));
+        _desks.SetRemote(_session.InEpisode);
+        NotifySummary();
+        UiStateChanged?.Invoke();
+    }
+
+    public void SetMainScreen(string? screenId)
+    {
+        _config = _config.WithMainScreen(screenId);
+        _configStore.Save(_config);
+        OnTick();
+        UiStateChanged?.Invoke();
+    }
+
+    private void BringCursorHome(bool includePersistentMain)
+    {
+        try
+        {
+            var kept = new List<RectD>();
+            var main = _displays.MainArea() ?? default;
+            if (main.Width > 0 && main.Height > 0)
+                kept.Add(main);
+
+            foreach (var other in _displays.OtherDisplays())
+            {
+                var b = _displays.BoundsOf(other.DisplayId);
+                if (b is { Width: > 0, Height: > 0 })
+                    kept.Add(b.Value);
+            }
+
+            if (includePersistentMain && !string.IsNullOrWhiteSpace(_config.MainScreen))
+            {
+                var st = _desks.StateOf(_config.MainScreen);
+                if (st?.DisplayId is { } mainVirtId && _displays.BoundsOf(mainVirtId) is { Width: > 0, Height: > 0 } mb)
+                    kept.Add(mb);
+            }
+
+            if (CursorHelper.BringHomeIfOutside(kept, main))
+                Log.Info("已将鼠标指针带回保留显示器中央");
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"归位鼠标指针失败：{ex.Message}");
+        }
     }
 
     public void RenameScreen(string screenId, string name)

@@ -21,9 +21,17 @@ namespace SnugWin.Windows.Sensing;
 public sealed class UUSensor
 {
     private readonly StreamLogActivityTracker _streamLog = new();
+    private readonly UUProcessWatch _serverWatch;
+    private readonly UUProcessWatch _clientWatch;
     private int _lastServerPid;
     private string? _resolvedLogDir;
     private bool _loggedLogReadError;
+
+    public UUSensor()
+    {
+        _serverWatch = new UUProcessWatch(() => FindProcessPid("GameViewerServer"), IsProcessAlive);
+        _clientWatch = new UUProcessWatch(() => FindProcessPid("GameViewer"), IsProcessAlive);
+    }
 
     public bool ManualOverride { get; set; }
     public bool LastPeerTcpObserved { get; private set; }
@@ -38,14 +46,27 @@ public sealed class UUSensor
                 CaptureActive: true);
         }
 
-        int? serverPid = FindProcessPid("GameViewerServer");
-        int? clientPid = FindProcessPid("GameViewer");
+        int? serverPid = _serverWatch.Resolve(now);
+        int? clientPid = _clientWatch.Resolve(now);
 
         bool overlayVisible = serverPid is { } sp && HasVisibleWindow(sp);
         var controllers = clientPid is { } cp ? ReadControllers(cp) : ControllerTable.Unreadable;
         bool? captureActive = SampleCaptureActive(serverPid, now);
 
         return new UUSignals(overlayVisible, controllers, captureActive);
+    }
+
+    private static bool IsProcessAlive(int pid)
+    {
+        try
+        {
+            using var proc = Process.GetProcessById(pid);
+            return !proc.HasExited;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static int? FindProcessPid(string processName)

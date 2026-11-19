@@ -16,7 +16,8 @@ public sealed record ScreenWish(
     PhoneChoice Device,
     ScreenOrientation Orientation,
     ScreenFit Fit,
-    ScreenBehavior Behavior)
+    ScreenBehavior Behavior,
+    bool IsMain = false)
 {
     public bool IsTouch => Behavior == ScreenBehavior.TouchScreen;
 }
@@ -31,18 +32,20 @@ public static class ScreenPlan
 
     public static IReadOnlyList<ScreenWish> Wishes(AppConfig config, bool remote, bool preview = false)
     {
-        if (!remote && !preview) return [];
-
-        return config.EffectiveScreens()
+        var enabled = config.EffectiveScreens()
             .Where(s => s.Enabled)
-            .Take(ScreenConfig.Limit)
+            .Take(ScreenConfig.Limit);
+
+        return enabled
+            .Where(s => remote || preview || string.Equals(s.Id, config.MainScreen, StringComparison.OrdinalIgnoreCase))
             .Select(s => new ScreenWish(
                 s.Id,
                 s.Name,
                 s.Device,
                 s.Orientation,
                 FitOf(s),
-                BehaviorOf(s.Device.Kind)))
+                BehaviorOf(s.Device.Kind),
+                IsMain: string.Equals(s.Id, config.MainScreen, StringComparison.OrdinalIgnoreCase)))
             .ToList();
     }
 }
