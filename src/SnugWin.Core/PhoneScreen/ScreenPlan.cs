@@ -28,7 +28,20 @@ public static class ScreenPlan
         kind.IsTouch() ? ScreenBehavior.TouchScreen : ScreenBehavior.Computer;
 
     public static ScreenFit FitOf(ScreenConfig screen) =>
-        ScreenFit.FromDevice(screen.Device.Screen, screen.Device.Kind, screen.Orientation);
+        screen is { FixedNativePixels: true, Device.Kind: DeviceKind.Phone, Orientation: ScreenOrientation.Portrait }
+            ? ScreenFit.FromNativePhone(screen.Device.Screen)
+            : ScreenFit.FromDevice(screen.Device.Screen, screen.Device.Kind, screen.Orientation);
+
+    /// <summary>
+    /// Keep only the screens that suit the current controller during a remote session.
+    /// Exempts persistent main screens (IsMain) and non-remote standby so v1.3.1 main screen
+    /// is never dropped.
+    /// </summary>
+    public static IReadOnlyList<ScreenWish> ForController(IReadOnlyList<ScreenWish> wishes, bool wantsTouch, bool remote = true)
+    {
+        if (!remote || wishes.Count == 0) return wishes;
+        return wishes.Where(w => w.IsMain || w.IsTouch == wantsTouch).ToList();
+    }
 
     public static IReadOnlyList<ScreenWish> Wishes(AppConfig config, bool remote, bool preview = false)
     {

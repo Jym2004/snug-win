@@ -51,33 +51,44 @@ public sealed record AppConfig
             ?? list.FirstOrDefault();
     }
 
+    public abstract record OtherOrientationResult
+    {
+        public sealed record Add(ScreenOrientation Orientation) : OtherOrientationResult;
+        public sealed record Existing(ScreenConfig Screen) : OtherOrientationResult;
+        public sealed record LimitReached : OtherOrientationResult;
+    }
+
+    /// <summary>
+    /// Finds or proposes the opposite-orientation counterpart for a touch screen of the same device model.
+    /// </summary>
+    public OtherOrientationResult? OtherOrientation(ScreenConfig screen)
+    {
+        if (!screen.Device.Kind.IsTouch()) return null;
+        var direction = screen.Orientation == ScreenOrientation.Portrait
+            ? ScreenOrientation.Landscape
+            : ScreenOrientation.Portrait;
+        var list = EffectiveScreens();
+        var matches = list.Where(s => s.Device == screen.Device && s.Orientation == direction).ToList();
+        var existing = matches.FirstOrDefault(s => s.Enabled) ?? matches.FirstOrDefault();
+        if (existing is not null) return new OtherOrientationResult.Existing(existing);
+        return list.Count < ScreenConfig.Limit
+            ? new OtherOrientationResult.Add(direction)
+            : new OtherOrientationResult.LimitReached();
+    }
+
     public AppConfig Sanitize()
     {
-        var phone = Phone.Screen.IsValid ? Phone : PhoneChoice.Standard;
+        var phone = Phone is { Screen.IsValid: true } ? Phone : PhoneChoice.Standard;
         var theme = Enum.IsDefined(Theme) ? Theme : AppThemeMode.Light;
+        var sanitizedScreens = SanitizeScreens(phone);
 
-        IReadOnlyList<ScreenConfig>? sanitizedScreens = null;
-        if (Screens is not null)
-        {
-            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var list = new List<ScreenConfig>();
-            foreach (var raw in Screens)
-            {
-                if (raw is null || !raw.Device.Screen.IsValid) continue;
-                var clean = raw.Sanitize();
-                if (!seen.Add(clean.Id)) continue;
-                list.Add(clean);
-                if (list.Count >= ScreenConfig.Limit) break;
-            }
-            sanitizedScreens = list;
-        }
-        else
-        {
-            sanitizedScreens = [ScreenConfig.LegacyPhone(phone, PhoneScreen)];
-        }
-
+        // Preserve legacy v2.5/1.x writeback for portrait phones, or a legacy-migrated portrait iPad.
         var legacyPhone = sanitizedScreens.FirstOrDefault(s =>
-            s.Orientation == ScreenOrientation.Portrait && s.Device.Kind == DeviceKind.Phone);
+                s.Orientation == ScreenOrientation.Portrait && s.Device.Kind == DeviceKind.Phone)
+            ?? sanitizedScreens.FirstOrDefault(s =>
+                string.Equals(s.Id, ScreenConfig.LegacyPhoneId, StringComparison.OrdinalIgnoreCase)
+                && s.Orientation == ScreenOrientation.Portrait
+                && s.Device.Kind == DeviceKind.Tablet);
 
         string? mainScreen = !string.IsNullOrWhiteSpace(MainScreen)
             && sanitizedScreens.Any(s => string.Equals(s.Id, MainScreen, StringComparison.OrdinalIgnoreCase) && s.Enabled)
@@ -93,6 +104,22 @@ public sealed record AppConfig
             Screens = sanitizedScreens,
             MainScreen = mainScreen
         };
+    }
+
+    private IReadOnlyList<ScreenConfig> SanitizeScreens(PhoneChoice phone)
+    {
+        if (Screens is null) return [ScreenConfig.LegacyPhone(phone, PhoneScreen)];
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var list = new List<ScreenConfig>();
+        foreach (var raw in Screens)
+        {
+            if (raw is not { Device.Screen.IsValid: true }) continue;
+            var clean = raw.Sanitize();
+            if (!seen.Add(clean.Id)) continue;
+            list.Add(clean);
+            if (list.Count >= ScreenConfig.Limit) break;
+        }
+        return list;
     }
 
     public AppConfig WithScreenAdded(ScreenOrientation orientation, PhoneChoice device, string? name = null)

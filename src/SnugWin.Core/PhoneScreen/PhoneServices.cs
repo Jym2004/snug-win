@@ -16,6 +16,9 @@ public interface IPhoneDisplays
     ScreenFit? FitOf(uint displayId);
     Task<bool> RetireAsync(uint displayId, CancellationToken ct = default);
     bool IsOnline(uint displayId);
+    bool IsAttachedToDesktop(uint displayId) => IsOnline(displayId);
+    Task<bool> TryReactivateAsync(uint displayId, int width, CancellationToken ct = default) => Task.FromResult(false);
+    bool IsRemoteExclusiveDisplayActive() => false;
     int? WidthOf(uint displayId);
     Task SetWidthAsync(uint displayId, int width, CancellationToken ct = default);
     RectD? BoundsOf(uint displayId);
@@ -93,12 +96,14 @@ public enum PhoneScreenErrorKind
 public sealed class PhoneScreenException : Exception
 {
     public PhoneScreenErrorKind Kind { get; }
+    public bool IsSafetyAbort { get; }
 
-    public PhoneScreenException(PhoneScreenErrorKind kind, string? detail = null)
+    public PhoneScreenException(PhoneScreenErrorKind kind, string? detail = null, bool isSafetyAbort = false)
         : base(detail ?? (kind == PhoneScreenErrorKind.CreateFailed
             ? "虚拟显示器创建失败，请检查 virtual-display-rs 驱动是否已安装并运行"
             : "手机屏已创建但系统未将其上线"))
     {
         Kind = kind;
+        IsSafetyAbort = isSafetyAbort;
     }
 }

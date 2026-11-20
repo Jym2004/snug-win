@@ -550,7 +550,7 @@
                     <Border Background="{DynamicResource BgCard}" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1" CornerRadius="14" Padding="16,14">
                         <StackPanel>
                             <TextBlock Text="致谢与开源许可" FontSize="13.5" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimary}" Margin="0,0,0,6"/>
-                            <TextBlock Text="MIT License（nicocart/snug-win），承接上游 zephyr4123/snug（v2.7.2）多屏多机型、常驻屏与交互状态机。"
+                            <TextBlock Text="MIT License（nicocart/snug-win），承接上游 zephyr4123/snug（v2.7.4）多屏多机型、常驻屏与交互状态机。"
                                        FontSize="12" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap" Margin="0,0,0,4"/>
                             <TextBlock Text="虚拟屏驱动基于 MolotovCherry/virtual-display-rs（0.3.1），内置 SHA-256 与签名指纹校验。"
                                        FontSize="12" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap" Margin="0,0,0,12"/>
@@ -625,6 +625,11 @@
                                                     Padding="10,4" FontSize="11.5" Margin="0,0,6,0"
                                                     Click="OnToggleMainScreenClick" Tag="{Binding Id}"
                                                     ToolTip="开启后此虚拟屏不等远程连接即常驻，断开时窗口原样保留"/>
+                                            <Button Content="{Binding OtherOrientationLabel}" Style="{StaticResource SecondaryButton}"
+                                                    Padding="10,4" FontSize="11.5" Margin="0,0,6,0"
+                                                    Visibility="{Binding OtherOrientationVisibility}"
+                                                    Click="OnUseOtherOrientationClick" Tag="{Binding Id}"
+                                                    ToolTip="添加或启用同型号的另一方向屏幕"/>
                                             <Button Content="预览界面" Style="{StaticResource SecondaryButton}"
                                                     Padding="10,4" FontSize="11.5" Margin="0,0,6,0"
                                                     Visibility="{Binding PreviewVisibility}"

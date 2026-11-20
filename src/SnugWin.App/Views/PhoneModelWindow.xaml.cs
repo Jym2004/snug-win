@@ -10,13 +10,20 @@ namespace SnugWin.App.Views;
 
 public partial class PhoneModelWindow : Window
 {
-    public sealed record ModelRow(PhoneModel Model)
+    public sealed record ModelRow(PhoneModel Model, SnugWin.Core.PhoneScreen.ScreenOrientation Orientation)
     {
         public string DisplayTitle => Model.Id;
         public string KindLabel => Model.Kind.DisplayName();
-        public string ResolutionText => Model.Screen.Points is { } pts
-            ? $"{Model.Screen.Width} × {Model.Screen.Height}（{pts}pt）"
-            : $"{Model.Screen.Width} × {Model.Screen.Height}";
+        public string ResolutionText
+        {
+            get
+            {
+                var (w, h) = Model.Screen.Dimensions(Orientation);
+                return Model.Screen.Points is { } pts
+                    ? $"{w} × {h}（{pts}pt）"
+                    : $"{w} × {h}";
+            }
+        }
     }
 
     private readonly AppController _controller;
@@ -24,6 +31,7 @@ public partial class PhoneModelWindow : Window
     private readonly string? _targetScreenId;
     private readonly IReadOnlySet<DeviceKind> _allowedKinds;
     private readonly bool _selectionOnly;
+    private readonly SnugWin.Core.PhoneScreen.ScreenOrientation _orientation;
     private DeviceKind? _selectedKindFilter;
 
     public PhoneChoice? SelectedChoice { get; private set; }
@@ -33,7 +41,8 @@ public partial class PhoneModelWindow : Window
         string? screenId = null,
         IReadOnlySet<DeviceKind>? allowedKinds = null,
         bool selectionOnly = false,
-        string? customTitle = null)
+        string? customTitle = null,
+        SnugWin.Core.PhoneScreen.ScreenOrientation? orientation = null)
     {
         InitializeComponent();
         _controller = controller;
@@ -41,9 +50,14 @@ public partial class PhoneModelWindow : Window
         _targetScreenId = screenId ?? controller.PrimaryTouchScreenId;
 
         var screenCfg = _targetScreenId is not null ? controller.GetScreenConfig(_targetScreenId) : null;
+        _orientation = orientation ?? screenCfg?.Orientation ?? SnugWin.Core.PhoneScreen.ScreenOrientation.Portrait;
         _allowedKinds = allowedKinds
             ?? screenCfg?.Device.Kind.SwappableKinds()
             ?? new HashSet<DeviceKind> { DeviceKind.Phone, DeviceKind.Tablet, DeviceKind.Computer };
+
+        CustomHintText.Text = _orientation == SnugWin.Core.PhoneScreen.ScreenOrientation.Landscape
+            ? "自定义分辨率 / 比例（例如 2400 × 1080 或 20 × 9）"
+            : "自定义分辨率 / 比例（例如 1080 × 2400 或 9 × 20）";
 
         if (!string.IsNullOrWhiteSpace(customTitle))
         {
@@ -114,7 +128,7 @@ public partial class PhoneModelWindow : Window
 
         var cfg = _targetScreenId is not null ? _controller.GetScreenConfig(_targetScreenId) : null;
         var cur = cfg?.Device ?? _controller.Config.Phone;
-        CurrentLabel.Text = $"{cur.Model ?? "自定义"}（{cur.Screen.Width} × {cur.Screen.Height}）";
+        CurrentLabel.Text = $"{cur.Model ?? "自定义"}（{cur.Screen.SizeText(_orientation)}）";
     }
 
     private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
@@ -138,7 +152,7 @@ public partial class PhoneModelWindow : Window
         foreach (var brand in _controller.Catalog.Search(query, filter))
         {
             foreach (var m in brand.Models)
-                rows.Add(new ModelRow(m));
+                rows.Add(new ModelRow(m, _orientation));
         }
         ModelList.ItemsSource = rows;
     }

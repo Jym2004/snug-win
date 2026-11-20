@@ -59,15 +59,15 @@ public sealed record DisplayModeInfo(
     int Width,
     int Height,
     double RefreshRate,
-    int DpiScalePercent)
+    int? DpiScalePercent)
 {
     public bool IsSameAs(DisplayModeInfo other) =>
         Width == other.Width
         && Height == other.Height
         && Math.Abs(RefreshRate - other.RefreshRate) < 0.5
-        && DpiScalePercent == other.DpiScalePercent;
+        && (DpiScalePercent is null || other.DpiScalePercent is null || DpiScalePercent == other.DpiScalePercent);
 
-    public override string ToString() => $"{Width}x{Height}@{RefreshRate:0.#}Hz ({DpiScalePercent}%)";
+    public override string ToString() => $"{Width}x{Height}@{RefreshRate:0.#}Hz ({(DpiScalePercent is { } d ? $"{d}%" : "?%")})";
 }
 
 public sealed record OtherDisplay(

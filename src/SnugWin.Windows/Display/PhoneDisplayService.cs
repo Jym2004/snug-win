@@ -1,477 +1,592 @@
-using System;
-using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.Diagnostics;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 using SnugWin.Core.Persistence;
 using SnugWin.Core.PhoneScreen;
 using SnugWin.Core.Support;
 
 namespace SnugWin.Windows.Display;
 
+// A null state means the pipe has been negotiated as write-only legacy Add.
+// On v2 Notify is a full replacement, including disabled monitors.
+internal interface IVirtualDisplayState
+{
+    Task<IReadOnlyList<VddMonitor>?> ReadStateAsync(CancellationToken ct);
+}
+
 public sealed class PhoneDisplayService : IPhoneDisplays, IAsyncDisposable
 {
-    private static readonly TimeSpan OnlineTimeout = TimeSpan.FromSeconds(8);
-    private static readonly TimeSpan OfflineTimeout = TimeSpan.FromSeconds(10);
+    private sealed record Screen(CherryMonitor Target, ScreenFit Fit, string Name);
 
+    private static readonly TimeSpan OnlineTimeout = TimeSpan.FromSeconds(8);
     private readonly IVirtualDisplayIpc _ipc;
-    private readonly OwnedDisplayStore? _ownedStore;
+    private readonly DisplayOwnership _ownership;
     private readonly Func<bool> _isPipeAvailable;
-    private readonly Func<IReadOnlyList<MonitorSnapshot>> _getActiveMonitors;
-    private readonly Func<int, int, int, int, bool> _tryAttachVirtual;
-    private readonly TimeSpan _onlineTimeout;
-    private readonly Dictionary<uint, ScreenFit> _fits = new();
-    private readonly Dictionary<uint, string> _deviceNames = new();
+    private readonly PhoneDisplayTopology _topology;
+    private readonly TimeSpan _timeout;
+    private readonly SemaphoreSlim _changes = new(1, 1);
+    private readonly HashSet<uint> _unconfirmed = [];
+    private readonly ConcurrentDictionary<uint, Screen> _ready = new();
+    private readonly ConcurrentDictionary<uint, CherryMonitor> _retiring = new();
+    private readonly HashSet<string> _startupPhysicalDevices;
 
     public PhoneDisplayService(VirtualDisplayIpcClient? ipc = null, SnugPaths? paths = null)
-        : this(
-            (IVirtualDisplayIpc?)ipc ?? new VirtualDisplayIpcClient(),
-            paths,
-            () => VirtualDisplayIpcClient.IsDriverPipeAvailable(),
-            () => DisplayConfigService.GetActiveMonitors(),
-            (w, h, x, y) => DisplayConfigService.TryAttachVirtualDisplay(w, h, x, y, out _),
-            OnlineTimeout)
-    {
-    }
+        : this(ipc ?? new VirtualDisplayIpcClient(), paths, () => VirtualDisplayIpcClient.IsDriverPipeAvailable(), new()) { }
 
-    internal PhoneDisplayService(
-        IVirtualDisplayIpc ipc,
-        SnugPaths? paths,
-        Func<bool> isPipeAvailable,
-        Func<IReadOnlyList<MonitorSnapshot>> getActiveMonitors,
-        Func<int, int, int, int, bool>? tryAttachVirtual = null,
-        TimeSpan? onlineTimeout = null)
+    internal PhoneDisplayService(IVirtualDisplayIpc ipc, SnugPaths? paths, Func<bool> isPipeAvailable,
+        PhoneDisplayTopology topology, TimeSpan? timeout = null)
     {
         _ipc = ipc;
-        if (paths is not null)
-            _ownedStore = new OwnedDisplayStore(paths.OwnedDisplaysFile);
+        _ownership = new(paths?.OwnedDisplaysFile);
         _isPipeAvailable = isPipeAvailable;
-        _getActiveMonitors = getActiveMonitors;
-        _tryAttachVirtual = tryAttachVirtual ?? ((w, h, x, y) => DisplayConfigService.TryAttachVirtualDisplay(w, h, x, y, out _));
-        _onlineTimeout = onlineTimeout ?? OnlineTimeout;
+        _topology = topology;
+        _timeout = timeout ?? OnlineTimeout;
+        _startupPhysicalDevices = _topology.Active()
+            .Where(m => m.Cherry is null && !IsVirtualDisplayAdapter(m))
+            .Select(m => m.DeviceName)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
     public async Task CleanupOrphansAsync(CancellationToken ct = default)
     {
-        if (_ownedStore is null) return;
-        var ownedIds = _ownedStore.LoadIds();
-        if (ownedIds.Count == 0) return;
-
-        if (!_isPipeAvailable())
-        {
-            Log.Warn("启动清理时驱动管道暂未就绪，保留归属记录以便管道恢复后清理");
-            return;
-        }
-
+        await _changes.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            await _ipc.RemoveAsync(ownedIds.ToArray(), ct).ConfigureAwait(false);
-            await Task.Delay(300, ct).ConfigureAwait(false);
-            _ownedStore.ClearAll();
-            Log.Info($"已按归属记录清理残留手机屏：#{string.Join(", #", ownedIds)}");
+            if (!_isPipeAvailable()) return;
+            foreach (var receipt in _ownership.All())
+            {
+                if (!_ready.ContainsKey(receipt.DriverId))
+                    await RemoveOwnedAsync(receipt, ct).ConfigureAwait(false);
+            }
         }
-        catch (Exception ex)
-        {
-            Log.Warn($"启动清理残留虚拟屏时异常：{ex.Message}");
-        }
+        finally { _changes.Release(); }
     }
 
-    public Task<uint> CreateAsync(ScreenFit fit, CancellationToken ct = default) =>
-        CreateAsync(fit, null, ct);
+    public Task<uint> CreateAsync(ScreenFit fit, CancellationToken ct = default) => CreateAsync(fit, null, ct);
 
     public async Task<uint> CreateAsync(ScreenFit fit, string? displayName, CancellationToken ct = default)
     {
-        if (!_isPipeAvailable())
+        await _changes.WaitAsync(ct).ConfigureAwait(false);
+        try
         {
-            Log.Warn("未检测到虚拟屏管道，尝试自动重启 Cherry Virtual Display 设备...");
-            if (await TryRestartVirtualDisplayDeviceAsync(ct).ConfigureAwait(false))
-            {
-                Log.Info("虚拟屏设备重启成功，驱动管道已恢复");
-            }
-            else
-            {
-                throw new PhoneScreenException(
-                    PhoneScreenErrorKind.CreateFailed,
-                    "未检测到 virtual-display-rs 驱动管道（\\\\.\\pipe\\virtualdisplaydriver），请确认驱动已安装且正常运行");
-            }
+            if (!_isPipeAvailable()) throw Failed("未检测到 virtual-display-rs 驱动管道，未更改显示配置");
+            var (state, connectionId) = await DriverStateSessionAsync(ct).ConfigureAwait(false);
+            var before = await ReadBaselineAsync(ct).ConfigureAwait(false);
+            var baselineNonCherry = SnapshotNonCherryDisplays();
+            var occupied = before.OccupiedIds.Concat(_ready.Keys).Concat(_retiring.Keys).Concat(_unconfirmed).ToHashSet();
+            occupied.UnionWith(state is null ? _topology.LegacyProfileIds() : state.Select(m => m.Id));
+            uint id = PhoneScreenSpec.CandidateIds.FirstOrDefault(i => !occupied.Contains(i), uint.MaxValue);
+            if (id == uint.MaxValue) throw Failed("没有可安全使用的 Cherry 显示器编号");
+            string name = string.IsNullOrWhiteSpace(displayName) ? PhoneScreenSpec.Name : displayName;
+            var monitor = new VddMonitor(id, name, true, BuildModes(fit));
+            ct.ThrowIfCancellationRequested();
+            await SubmitAsync(monitor, state, connectionId, replace: false, ct).ConfigureAwait(false);
+            await CompleteArrivalAsync(monitor, fit, before, baselineNonCherry, ct).ConfigureAwait(false);
+            return id;
         }
-
-        var beforeMonitors = _getActiveMonitors();
-        var existingDevices = beforeMonitors
-            .Select(m => m.DeviceName)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        int existingVirtualCount = beforeMonitors.Count(m =>
-            m.DeviceString.Contains("Virtual", StringComparison.OrdinalIgnoreCase)
-            || m.FriendlyName.Contains("VirtuDisplay", StringComparison.OrdinalIgnoreCase)
-            || m.FriendlyName.Contains("Virtual", StringComparison.OrdinalIgnoreCase));
-
-        string vddName = string.IsNullOrWhiteSpace(displayName) ? PhoneScreenSpec.Name : displayName;
-        var modes = BuildModes(fit);
-        foreach (uint candidateId in CandidateIdsStartingAfter(existingVirtualCount))
-        {
-            if (_fits.ContainsKey(candidateId))
-                continue;
-
-            try
-            {
-                var mon = new VddMonitor(candidateId, vddName, true, modes);
-                await _ipc.NotifyAsync([mon], ct).ConfigureAwait(false);
-                Log.Info($"已向驱动发送建屏请求（{vddName} id={candidateId}，共 {modes.Count} 档，首档 {modes[0].Width}x{modes[0].Height}）");
-            }
-            catch (Exception ex)
-            {
-                Log.Warn($"手机屏（id={candidateId}）IPC Notify 失败：{ex.Message}");
-                continue;
-            }
-
-            var (basePxW, basePxH) = fit.PixelSize(fit.BaseWidth);
-            var snapshot = await WaitForOnlineAsync(existingDevices, basePxW, basePxH, _onlineTimeout, _getActiveMonitors, _tryAttachVirtual, ct).ConfigureAwait(false);
-            if (snapshot is null)
-            {
-                Log.Warn($"手机屏（id={candidateId}）创建后 {_onlineTimeout.TotalSeconds:0.#}s 内未在 Windows 上线，跳过该候选 ID 而不移除未知设备");
-                continue;
-            }
-
-            _fits[candidateId] = fit;
-            _deviceNames[candidateId] = snapshot.DeviceName;
-            _ownedStore?.RecordOwned(candidateId);
-
-            await SetWidthAsync(candidateId, fit.BaseWidth, ct).ConfigureAwait(false);
-            return candidateId;
-        }
-
-        throw new PhoneScreenException(PhoneScreenErrorKind.NeverOnline);
+        finally { _changes.Release(); }
     }
 
-    internal static IReadOnlyList<uint> CandidateIdsStartingAfter(int existingVirtualCount)
+    private IReadOnlyList<(uint StableId, bool IsPrimary)> SnapshotNonCherryDisplays() =>
+        _topology.Active()
+            .Where(m => m.Cherry is null)
+            .Select(m => (m.StableId, m.IsPrimary))
+            .ToArray();
+
+    private void EnsureNonCherryIntact(IReadOnlyList<(uint StableId, bool IsPrimary)> baseline)
     {
-        var ids = PhoneScreenSpec.CandidateIds;
-        if (existingVirtualCount <= 0 || ids.Length <= 1)
-            return ids;
-        int offset = existingVirtualCount % ids.Length;
-        if (offset == 0) return ids;
-        var rotated = new uint[ids.Length];
-        for (int i = 0; i < ids.Length; i++)
-            rotated[i] = ids[(i + offset) % ids.Length];
-        return rotated;
+        if (baseline.Count == 0) return;
+        var active = _topology.Active();
+        var activeIds = active.Where(m => m.Cherry is null).Select(m => m.StableId).ToHashSet();
+        foreach (var (stableId, wasPrimary) in baseline)
+        {
+            if (!activeIds.Contains(stableId))
+                throw Failed(wasPrimary
+                    ? "建屏过程中原主显示器脱离活动桌面，已中止以保护桌面输出"
+                    : "建屏过程中原有非 Cherry 显示器脱离活动桌面，已中止", isSafetyAbort: true);
+        }
+    }
+
+    private async Task<CherryInventory> ReadBaselineAsync(CancellationToken ct)
+    {
+        var known = new HashSet<Guid>();
+        var occupied = new HashSet<uint>();
+        CherryInventory? Sample()
+        {
+            var scan = _topology.Inspect();
+            known.UnionWith(scan.KnownContainers);
+            occupied.UnionWith(scan.OccupiedIds);
+            if (scan.HasUnknownId) return null;
+            scan.KnownContainers.UnionWith(known);
+            scan.OccupiedIds.UnionWith(occupied);
+            return scan;
+        }
+        return await PollAsync(Sample, _timeout, ct).ConfigureAwait(false)
+            ?? throw Failed("仍有 Cherry 显示器的编号未知，未更改驱动配置", isSafetyAbort: true);
+    }
+
+    private async Task<IReadOnlyList<VddMonitor>?> DriverStateAsync(CancellationToken ct) =>
+        (await DriverStateSessionAsync(ct).ConfigureAwait(false)).State;
+
+    private async Task<(IReadOnlyList<VddMonitor>? State, long ConnectionId)> DriverStateSessionAsync(CancellationToken ct)
+    {
+        if (_ipc is IVirtualDisplayStateSession session)
+        {
+            var (state, connId) = await session.ReadStateSessionAsync(ct).ConfigureAwait(false);
+            if (state is not null || _ipc.IsLegacyProtocol) return (state, connId);
+        }
+        else if (_ipc is IVirtualDisplayState reader)
+        {
+            var state = await reader.ReadStateAsync(ct).ConfigureAwait(false);
+            if (state is not null || _ipc.IsLegacyProtocol) return (state, 0);
+        }
+        else if (_ipc.IsLegacyProtocol) return (null, 0);
+        throw Failed("无法确认驱动现有配置，为保护已有屏幕，未发送 Notify");
+    }
+
+    private async Task SubmitAsync(VddMonitor monitor, IReadOnlyList<VddMonitor>? state, long connectionId, bool replace, CancellationToken ct)
+    {
+        if (state is not null)
+            (state, connectionId) = await RefreshBeforeNotifyAsync(state, monitor.Id, ct).ConfigureAwait(false);
+        ct.ThrowIfCancellationRequested();
+        // Once sent, finish the bounded write (including legacy Remove + Add).
+        // Observe caller cancellation in the arrival/rollback path, not mid-write.
+        using var write = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        _unconfirmed.Add(monitor.Id); // the write-only driver may silently ignore an occupied slot
+        if (replace && state is null)
+            await _ipc.ReplaceLegacyAsync([monitor.Id], [monitor], write.Token).ConfigureAwait(false);
+        else
+        {
+            var payload = state is null ? [monitor] : (IReadOnlyList<VddMonitor>)[.. state.Where(m => m.Id != monitor.Id), monitor];
+            if (state is not null && _ipc is IVirtualDisplayStateSession session)
+                await session.NotifyOnConnectionAsync(payload, connectionId, write.Token).ConfigureAwait(false);
+            else
+                await _ipc.NotifyAsync(payload, write.Token).ConfigureAwait(false);
+        }
+    }
+
+    private async Task<(IReadOnlyList<VddMonitor> State, long ConnectionId)> RefreshBeforeNotifyAsync(IReadOnlyList<VddMonitor> baseline, uint id, CancellationToken ct)
+    {
+        var (latest, connectionId) = await DriverStateSessionAsync(ct).ConfigureAwait(false);
+        if (latest is null) throw Failed("驱动协议发生变化");
+        var before = baseline.Where(m => m.Id == id).ToArray();
+        var current = latest.Where(m => m.Id == id).ToArray();
+        // Comparing the wire representation includes nested mode and refresh-rate lists.
+        if (VirtualDisplayIpcClient.SerializeNotify(before) != VirtualDisplayIpcClient.SerializeNotify(current))
+            throw Failed($"Cherry 显示器 #{id} 在建屏期间已被其他程序更改");
+        return (latest, connectionId);
+    }
+
+    private async Task CompleteArrivalAsync(VddMonitor monitor, ScreenFit fit, CherryInventory before,
+        IReadOnlyList<(uint StableId, bool IsPrimary)> baselineNonCherry, CancellationToken ct)
+    {
+        CherryMonitor? proof = null;
+        try
+        {
+            proof = await FindArrivalAsync(monitor, before, _timeout, ct).ConfigureAwait(false)
+                ?? throw new PhoneScreenException(PhoneScreenErrorKind.NeverOnline);
+            _unconfirmed.Remove(proof.DriverId);
+            _ownership.Record(proof);
+            await WaitForDesktopAsync(proof, fit, baselineNonCherry, ct).ConfigureAwait(false);
+            EnsureNonCherryIntact(baselineNonCherry);
+            await ApplyWidthAsync(proof, fit, fit.BaseWidth, ct).ConfigureAwait(false);
+            EnsureNonCherryIntact(baselineNonCherry);
+            ct.ThrowIfCancellationRequested();
+            _ready[monitor.Id] = new(proof, fit, monitor.Name!);
+            Log.Info($"Cherry 手机屏 #{monitor.Id} 已按 EDID 确认并切到 {fit}");
+        }
+        catch
+        {
+            await RollbackArrivalAsync(proof, monitor, before).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    private async Task<CherryMonitor?> FindArrivalAsync(VddMonitor monitor, CherryInventory before, TimeSpan timeout, CancellationToken ct)
+    {
+        CherryMonitor? FreshTarget()
+        {
+            var current = _topology.Inspect().Unique(monitor.Id);
+            return current is not null && !before.KnownContainers.Contains(current.ContainerId) ? current : null;
+        }
+        var target = await PollAsync(FreshTarget, timeout, ct).ConfigureAwait(false);
+        if (target is null || _ipc.IsLegacyProtocol) return target;
+        var state = await DriverStateAsync(ct).ConfigureAwait(false);
+        if (state is null) return null;
+        var actual = state.Where(m => m.Id == monitor.Id).ToArray();
+        return VirtualDisplayIpcClient.SerializeNotify(actual) == VirtualDisplayIpcClient.SerializeNotify([monitor]) ? target : null;
+    }
+
+    private async Task RollbackArrivalAsync(CherryMonitor? proof, VddMonitor monitor, CherryInventory before)
+    {
+        try
+        {
+            // Cancellation can win just after the write, before PnP delivers the arrival.
+            var grace = TimeSpan.FromMilliseconds(Math.Min(1000, _timeout.TotalMilliseconds));
+            proof ??= await FindArrivalAsync(monitor, before, grace, CancellationToken.None).ConfigureAwait(false);
+            if (proof is null) return; // a successful pipe write alone is not ownership
+            _unconfirmed.Remove(proof.DriverId);
+            _ownership.Record(proof);
+            if (!await RemoveOwnedAsync(proof, CancellationToken.None).ConfigureAwait(false)
+                && !_ready.ContainsKey(proof.DriverId))
+            {
+                _retiring[proof.DriverId] = proof;
+            }
+        }
+        catch (Exception ex) { Log.Warn($"回滚未完成：{ex.Message}"); }
+    }
+
+    private async Task WaitForDesktopAsync(CherryMonitor target, ScreenFit fit,
+        IReadOnlyList<(uint StableId, bool IsPrimary)> baselineNonCherry, CancellationToken ct)
+    {
+        var (w, h) = fit.PixelSize(fit.BaseWidth);
+        string? attachedName = null;
+        var sinceAttempt = Stopwatch.StartNew();
+        bool attempted = false;
+        MonitorSnapshot? Observe()
+        {
+            EnsureNonCherryIntact(baselineNonCherry);
+            var online = _topology.Online(target, attachedName);
+            if (online is not null || attachedName is not null) return online;
+            if (attempted && sinceAttempt.ElapsedMilliseconds < 500) return null;
+            attempted = true;
+            sinceAttempt.Restart();
+            attachedName = _topology.Attach(target, w, h);
+            return attachedName is null ? null : _topology.Online(target, attachedName);
+        }
+        if (await PollAsync(Observe, _timeout, ct).ConfigureAwait(false) is null)
+            throw new PhoneScreenException(PhoneScreenErrorKind.NeverOnline);
     }
 
     public async Task<bool> ReshapeAsync(uint displayId, ScreenFit fit, CancellationToken ct = default)
     {
-        if (!_deviceNames.ContainsKey(displayId)) return false;
-
-        var modes = BuildModes(fit);
+        await _changes.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            var mon = new VddMonitor(displayId, PhoneScreenSpec.Name, true, modes);
-            if (_ipc.IsLegacyProtocol)
-                await _ipc.ReplaceLegacyAsync([displayId], [mon], ct).ConfigureAwait(false);
-            else
-                await _ipc.NotifyAsync([mon], ct).ConfigureAwait(false);
+            if (!_ready.TryGetValue(displayId, out var old)) return false;
+            var (state, connectionId) = await DriverStateSessionAsync(ct).ConfigureAwait(false);
+            var before = await ReadBaselineAsync(ct).ConfigureAwait(false);
+            if (before.Unique(displayId) != old.Target || _topology.Online(old.Target) is null) return false;
+            if (state is not null && !state.Any(m => m.Id == displayId && m.Enabled)) return false;
+            if (SameModes(old.Fit, fit))
+            {
+                await ApplyWidthAsync(old.Target, fit, fit.BaseWidth, ct).ConfigureAwait(false);
+                _ready[displayId] = old with { Fit = fit };
+            }
+            else await ReplaceScreenAsync(old, fit, state, connectionId, before, ct).ConfigureAwait(false);
+            return true;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Log.Warn($"手机屏 #{displayId} 换比例 Notify 失败：{ex.Message}");
+            Log.Warn($"Cherry 手机屏 #{displayId} 换比例失败：{ex.Message}");
             return false;
         }
-
-        _fits[displayId] = fit;
-        var (basePxW, basePxH) = fit.PixelSize(fit.BaseWidth);
-        string devName = _deviceNames[displayId];
-        var sw = Stopwatch.StartNew();
-        while (sw.Elapsed < TimeSpan.FromSeconds(4) && !ct.IsCancellationRequested)
-        {
-            if (DisplayConfigService.HasDisplayMode(devName, basePxW, basePxH))
-                break;
-            await Task.Delay(100, ct).ConfigureAwait(false);
-        }
-
-        await SetWidthAsync(displayId, fit.BaseWidth, ct).ConfigureAwait(false);
-        Log.Info($"手机屏 #{displayId} 已更换比例为 {fit}");
-        return true;
+        finally { _changes.Release(); }
     }
 
-    public ScreenFit? FitOf(uint displayId) =>
-        _fits.TryGetValue(displayId, out var fit) ? fit : null;
+    private async Task ReplaceScreenAsync(Screen old, ScreenFit fit, IReadOnlyList<VddMonitor>? state, long connectionId, CherryInventory before, CancellationToken ct)
+    {
+        uint id = old.Target.DriverId;
+        var monitor = new VddMonitor(id, old.Name, true, BuildModes(fit));
+        var baselineNonCherry = SnapshotNonCherryDisplays();
+        _ready.TryRemove(id, out _);
+        try
+        {
+            await SubmitAsync(monitor, state, connectionId, replace: true, ct).ConfigureAwait(false);
+            await CompleteArrivalAsync(monitor, fit, before, baselineNonCherry, ct).ConfigureAwait(false);
+            _ownership.Release(old.Target);
+        }
+        catch
+        {
+            if (_topology.Online(old.Target) is { } previous && WidthIn(old.Fit, previous) is not null)
+                _ready[id] = old;
+            else if (!await RemoveOwnedAsync(old.Target, CancellationToken.None).ConfigureAwait(false))
+                _retiring.TryAdd(id, old.Target);
+            throw;
+        }
+    }
 
     public async Task<bool> RetireAsync(uint displayId, CancellationToken ct = default)
     {
-        _fits.Remove(displayId);
-        _deviceNames.TryGetValue(displayId, out var devName);
-        _deviceNames.Remove(displayId);
-
+        await _changes.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            await _ipc.RemoveAsync([displayId], ct).ConfigureAwait(false);
-            _ownedStore?.ReleaseOwned(displayId);
-        }
-        catch (Exception ex)
-        {
-            Log.Warn($"移除手机屏 #{displayId} 失败：{ex.Message}");
-        }
-
-        if (string.IsNullOrEmpty(devName)) return true;
-
-        var sw = Stopwatch.StartNew();
-        bool gone = false;
-        while (sw.Elapsed < OfflineTimeout && !ct.IsCancellationRequested)
-        {
-            if (!DisplayConfigService.GetActiveMonitors().Any(m => m.DeviceName.Equals(devName, StringComparison.OrdinalIgnoreCase)))
+            if (_ready.TryGetValue(displayId, out var screen))
             {
-                gone = true;
-                break;
+                _retiring[displayId] = screen.Target;
+                _ready.TryRemove(displayId, out _);
             }
-            await Task.Delay(150, ct).ConfigureAwait(false);
+            if (!_retiring.TryGetValue(displayId, out var target)) return false;
+            if (!await RemoveOwnedAsync(target, ct).ConfigureAwait(false)) return false;
+            _retiring.TryRemove(displayId, out _);
+            _topology.RestoreCursorIfStranded();
+            return true;
         }
-        if (gone) RestoreCursorIfStranded();
-        return gone;
+        finally { _changes.Release(); }
     }
 
-    private static void RestoreCursorIfStranded()
+    private async Task<bool> RemoveOwnedAsync(CherryMonitor target, CancellationToken ct)
     {
-        if (!Native.Win32.GetCursorPos(out var pt)) return;
-        var monitors = DisplayConfigService.GetActiveMonitors();
-        if (monitors.Count == 0) return;
-        bool onAny = monitors.Any(m => m.Bounds.Contains(new PointD(pt.X, pt.Y)));
-        if (!onAny)
+        try
         {
-            var primary = monitors.FirstOrDefault(m => m.IsPrimary) ?? monitors[0];
-            Native.Win32.SetCursorPos((int)Math.Round(primary.Bounds.MidX), (int)Math.Round(primary.Bounds.MidY));
+            // Never remove a display that has become the sole active or primary desktop output.
+            var active = _topology.Active();
+            if (active.Any(m => m.Cherry == target && (m.IsPrimary || active.Count == 1)))
+            {
+                Log.Warn($"拒绝移除 Cherry 手机屏 #{target.DriverId}：当前为唯一活动输出或主显示器");
+                return false;
+            }
+
+            // Connect before rechecking the receipt, not after a potentially slow pipe negotiation.
+            var state = await DriverStateAsync(ct).ConfigureAwait(false);
+            var inventory = _topology.Inspect();
+            if (inventory.Unique(target.DriverId) == target)
+            {
+                if (state is not null && !state.Any(m => m.Id == target.DriverId && m.Enabled)) return false;
+                await _ipc.RemoveAsync([target.DriverId], ct).ConfigureAwait(false);
+                CherryMonitor? Gone() => MayStillExist(_topology.Inspect(), target) ? null : target;
+                if (await PollAsync(Gone, _timeout, ct).ConfigureAwait(false) is null) return false;
+            }
+            else if (MayStillExist(inventory, target)) return false;
+            _ownership.Release(target);
+            return true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Log.Warn($"未确认 Cherry 手机屏 #{target.DriverId} 已移除：{ex.Message}");
+            return false;
         }
     }
+
+    public ScreenFit? FitOf(uint displayId) => Confirmed(displayId)?.Fit;
 
     public bool IsOnline(uint displayId)
     {
-        if (!_deviceNames.TryGetValue(displayId, out var devName)) return false;
-        return DisplayConfigService.GetActiveMonitors()
-            .Any(m => m.DeviceName.Equals(devName, StringComparison.OrdinalIgnoreCase));
+        var target = _ready.GetValueOrDefault(displayId)?.Target ?? _retiring.GetValueOrDefault(displayId);
+        return target is not null && MayStillExist(_topology.Inspect(), target);
     }
 
-    public int? WidthOf(uint displayId)
+    public bool IsAttachedToDesktop(uint displayId)
     {
-        var mon = FindMonitor(displayId);
-        if (mon is null) return null;
-        if (_fits.TryGetValue(displayId, out var fit))
-        {
-            foreach (int w in fit.Widths)
-            {
-                if (fit.PixelSize(w).PixelWidth == mon.Mode.Width)
-                    return w;
-            }
-        }
-        return (int)Math.Round(mon.Mode.Width / 2.0, MidpointRounding.AwayFromZero);
+        if (!_ready.TryGetValue(displayId, out var screen)) return false;
+        return _topology.Active().Any(m => m.Cherry == screen.Target);
     }
+
+    private static bool IsVirtualDisplayAdapter(MonitorSnapshot m) =>
+        m.Cherry is not null
+        || m.DeviceString.Contains("Virtual", StringComparison.OrdinalIgnoreCase)
+        || m.DeviceString.Contains("VirtuDisplay", StringComparison.OrdinalIgnoreCase)
+        || m.AdapterHardwareId.StartsWith(@"Root\", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// True only when UU's own virtual display is active AND every real monitor present at
+    /// startup has been detached (UU 超级屏). SnugWin then waits instead of re-adding screens.
+    /// </summary>
+    public bool IsRemoteExclusiveDisplayActive()
+    {
+        if (_startupPhysicalDevices.Count == 0) return false;
+        var active = _topology.Active();
+        bool uuActive = active.Any(m =>
+            m.DeviceString.Contains("GameViewer Virtual Display Adapter", StringComparison.OrdinalIgnoreCase)
+            || m.AdapterHardwareId.Contains("GameViewer", StringComparison.OrdinalIgnoreCase));
+        bool realStillHere = active.Any(m => m.Cherry is null && !IsVirtualDisplayAdapter(m));
+        bool startupDisplaysGone = _startupPhysicalDevices.All(name =>
+            active.All(m => !m.DeviceName.Equals(name, StringComparison.OrdinalIgnoreCase)));
+        return uuActive && !realStillHere && startupDisplaysGone;
+    }
+
+    /// <summary>
+    /// Re-attach one already-bound SnugWin display after a topology change using its CherryMonitor
+    /// identity and CCD target path, re-checking remote-exclusive status before each attach attempt.
+    /// </summary>
+    public async Task<bool> TryReactivateAsync(uint displayId, int width, CancellationToken ct = default)
+    {
+        await _changes.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            if (!_ready.TryGetValue(displayId, out var screen)) return false;
+            if (IsRemoteExclusiveDisplayActive()) return false;
+
+            var target = screen.Target;
+            var fit = screen.Fit;
+            int requestedWidth = fit.Widths.Contains(width) ? width : fit.BaseWidth;
+
+            if (_topology.Online(target) is not null)
+            {
+                await ApplyWidthAsync(target, fit, requestedWidth, ct).ConfigureAwait(false);
+                return true;
+            }
+
+            if (_topology.Inspect().Unique(target.DriverId) != target) return false;
+
+            var (state, connectionId) = await DriverStateSessionAsync(ct).ConfigureAwait(false);
+            if (state is not null && !state.Any(m => m.Id == displayId && m.Enabled))
+            {
+                if (IsRemoteExclusiveDisplayActive()) return false;
+                var monitor = new VddMonitor(displayId, screen.Name, true, BuildModes(fit));
+                IReadOnlyList<VddMonitor> payload = [.. state.Where(m => m.Id != displayId), monitor];
+                if (_ipc is IVirtualDisplayStateSession session)
+                    await session.NotifyOnConnectionAsync(payload, connectionId, ct).ConfigureAwait(false);
+                else
+                    await _ipc.NotifyAsync(payload, ct).ConfigureAwait(false);
+            }
+
+            if (IsRemoteExclusiveDisplayActive()) return false;
+            var (pxW, pxH) = fit.PixelSize(requestedWidth);
+            string? attachedName = null;
+            var sinceAttempt = Stopwatch.StartNew();
+            bool attempted = false;
+            MonitorSnapshot? Observe()
+            {
+                if (IsRemoteExclusiveDisplayActive()) return null;
+                var online = _topology.Online(target, attachedName);
+                if (online is not null || attachedName is not null) return online;
+                if (attempted && sinceAttempt.ElapsedMilliseconds < 500) return null;
+                attempted = true;
+                sinceAttempt.Restart();
+                attachedName = _topology.Attach(target, pxW, pxH);
+                return attachedName is null ? null : _topology.Online(target, attachedName);
+            }
+
+            var timer = Stopwatch.StartNew();
+            while (timer.Elapsed < _timeout && !ct.IsCancellationRequested)
+            {
+                if (IsRemoteExclusiveDisplayActive()) return false;
+                if (Observe() is not null)
+                {
+                    await ApplyWidthAsync(target, fit, requestedWidth, ct).ConfigureAwait(false);
+                    return true;
+                }
+                await Task.Delay(100, ct).ConfigureAwait(false);
+            }
+            return false;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Log.Warn($"Cherry 手机屏 #{displayId} 恢复失败：{ex.Message}");
+            return false;
+        }
+        finally { _changes.Release(); }
+    }
+
+    private bool MayStillExist(CherryInventory inventory, CherryMonitor target) =>
+        inventory.MayContain(target) || _topology.Active().Any(m => m.Cherry == target);
 
     public async Task SetWidthAsync(uint displayId, int width, CancellationToken ct = default)
     {
-        if (!_fits.TryGetValue(displayId, out var fit) || !_deviceNames.TryGetValue(displayId, out var devName))
-            return;
-
-        var (pxW, pxH) = fit.PixelSize(width);
-        var current = FindMonitor(displayId);
-        if (current is null || current.Mode.Width != pxW || current.Mode.Height != pxH)
+        await _changes.WaitAsync(ct).ConfigureAwait(false);
+        try
         {
-            if (!DisplayConfigService.SetResolution(devName, pxW, pxH, 60))
-                return;
-            await Task.Delay(150, ct).ConfigureAwait(false);
+            if (!_ready.TryGetValue(displayId, out var screen)) throw Failed($"手机屏 #{displayId} 未就绪");
+            await ApplyWidthAsync(screen.Target, screen.Fit, width, ct).ConfigureAwait(false);
         }
-
-        var after = FindMonitor(displayId);
-        int targetDpi = fit.TargetDpiPercent(width);
-        if (after is not null && after.Mode.DpiScalePercent != targetDpi)
-        {
-            if (DisplayConfigService.SetDpiScalePercent(after.AdapterId, after.SourceId, targetDpi))
-            {
-                var updated = FindMonitor(displayId);
-                Log.Info($"虚拟屏 #{displayId} 切到 {pxW}x{pxH}，DPI 设为 {updated?.Mode.DpiScalePercent ?? targetDpi}%");
-            }
-        }
+        finally { _changes.Release(); }
     }
 
-    public RectD? BoundsOf(uint displayId) => FindMonitor(displayId)?.Bounds;
-
-    public RectD? WindowAreaOf(uint displayId)
+    private async Task ApplyWidthAsync(CherryMonitor target, ScreenFit fit, int width, CancellationToken ct)
     {
-        var mon = FindMonitor(displayId);
-        if (mon is null) return null;
-        var work = mon.WorkArea;
-        if (_fits.TryGetValue(displayId, out var fit) && fit.Kind == DeviceKind.Computer)
-            return work;
-
-        int logicalW = WidthOf(displayId) ?? ScreenFit.DesignWidth;
-        var logicalSize = fit?.Size(logicalW) ?? new SizeD(logicalW, logicalW);
-        double scale = Math.Max(1.0, mon.Mode.Width / (double)logicalW);
-        double homeBarPx = Math.Round(ScreenFit.HomeBarHeight(logicalSize) * scale);
-        double h = Math.Max(100, work.Height - homeBarPx);
-        return new RectD(work.X, work.Y, work.Width, h);
+        ct.ThrowIfCancellationRequested();
+        var (w, h) = fit.PixelSize(width);
+        var current = _topology.Online(target) ?? throw Failed($"未找到独立的 Cherry 手机屏 #{target.DriverId}");
+        bool Sized(MonitorSnapshot? m) => m?.Mode.Width == w && m.Mode.Height == h && Math.Abs(m.Mode.RefreshRate - 60.0) < 1.0;
+        MonitorSnapshot? ReadSize() => _topology.Online(target) is { } m && Sized(m) ? m : null;
+        if (!Sized(current))
+        {
+            if (!_topology.SetResolution(current, w, h, 60)) throw Failed($"Cherry 手机屏 #{target.DriverId} 切换 {w}x{h} @ 60Hz 失败");
+            current = await PollAsync(ReadSize, _timeout, ct).ConfigureAwait(false) ?? throw Failed($"未确认手机屏已切换 {w}x{h} @ 60Hz");
+        }
+        await ApplyScaleAsync(current, fit.TargetDpiPercent(width), ReadSize, ct).ConfigureAwait(false);
     }
+
+    private async Task ApplyScaleAsync(MonitorSnapshot current, int requested, Func<MonitorSnapshot?> readSize, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        int dpi = current.ResolveDpiScalePercent(requested) ?? throw Failed("无法确认手机屏支持的缩放档位");
+        if (dpi != requested) Log.Info($"Cherry 手机屏 #{current.Cherry!.DriverId} 请求 {requested}% 缩放，最接近的支持档位为 {dpi}%");
+        if (current.Mode.DpiScalePercent == dpi) return;
+        if (!_topology.SetScale(current, dpi)) throw Failed($"Cherry 手机屏 #{current.Cherry!.DriverId} 设置 {dpi}% 缩放失败");
+        MonitorSnapshot? ReadDpi() => readSize() is { } m && m.Mode.DpiScalePercent == dpi ? m : null;
+        if (await PollAsync(ReadDpi, _timeout, ct).ConfigureAwait(false) is null) throw Failed($"未确认手机屏缩放为 {dpi}%");
+    }
+
+    private (MonitorSnapshot Monitor, ScreenFit Fit, int Width)? Confirmed(uint id)
+    {
+        if (!_ready.TryGetValue(id, out var screen) || _topology.Online(screen.Target) is not { } mon) return null;
+        return WidthIn(screen.Fit, mon) is { } width ? (mon, screen.Fit, width) : null;
+    }
+
+    private static int? WidthIn(ScreenFit fit, MonitorSnapshot mon)
+    {
+        foreach (int width in fit.Widths)
+            if (fit.PixelSize(width) == (mon.Mode.Width, mon.Mode.Height)) return width;
+        return null;
+    }
+
+    public int? WidthOf(uint displayId) => Confirmed(displayId)?.Width;
+    public RectD? BoundsOf(uint displayId) => Confirmed(displayId)?.Monitor.Bounds;
+
+    public RectD? WindowAreaOf(uint displayId) => Confirmed(displayId) is { } screen ? WindowArea(screen) : null;
 
     public RectD? HomeBarAreaOf(uint displayId)
     {
-        if (_fits.TryGetValue(displayId, out var fit) && fit.Kind == DeviceKind.Computer)
-            return null;
-        var mon = FindMonitor(displayId);
-        if (mon is null || WindowAreaOf(displayId) is not { } area) return null;
-        var work = mon.WorkArea;
-        double barH = Math.Max(28, work.MaxY - area.MaxY);
-        return new RectD(work.X, area.MaxY, work.Width, barH);
+        if (Confirmed(displayId) is not { } screen || screen.Fit.Kind == DeviceKind.Computer) return null;
+        var work = screen.Monitor.WorkArea;
+        var area = WindowArea(screen);
+        return new RectD(work.X, area.MaxY, work.Width, Math.Max(28, work.MaxY - area.MaxY));
+    }
+
+    private static RectD WindowArea((MonitorSnapshot Monitor, ScreenFit Fit, int Width) screen)
+    {
+        var work = screen.Monitor.WorkArea;
+        if (screen.Fit.Kind == DeviceKind.Computer) return work;
+        double scale = Math.Max(1.0, screen.Monitor.Mode.Width / (double)screen.Width);
+        double bar = Math.Round(ScreenFit.HomeBarHeight(screen.Fit.Size(screen.Width)) * scale);
+        return new(work.X, work.Y, work.Width, Math.Max(100, work.Height - bar));
     }
 
     public RectD? MainArea()
     {
-        var all = DisplayConfigService.GetActiveMonitors();
-        var phoneSet = _deviceNames.Values.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var main = all.FirstOrDefault(m => m.IsPrimary && !phoneSet.Contains(m.DeviceName))
-                   ?? all.FirstOrDefault(m => !phoneSet.Contains(m.DeviceName));
-        return main?.WorkArea;
+        var others = _topology.Active().Where(m => m.Cherry is null).ToList();
+        return (others.FirstOrDefault(m => m.IsPrimary) ?? others.FirstOrDefault())?.WorkArea;
     }
 
-    public IReadOnlyList<OtherDisplay> OtherDisplays()
-    {
-        var phoneSet = _deviceNames.Values.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        return DisplayConfigService.GetActiveMonitors()
-            .Where(m => !phoneSet.Contains(m.DeviceName)
-                        && !m.DeviceString.Contains("Virtual", StringComparison.OrdinalIgnoreCase)
-                        && !m.FriendlyName.Contains("VirtuDisplay", StringComparison.OrdinalIgnoreCase))
-            .Select(m => new OtherDisplay(m.StableId, m.DeviceName, m.FriendlyName, m.Mode))
-            .ToList();
-    }
+    public IReadOnlyList<OtherDisplay> OtherDisplays() => _topology.Active().Where(PhoneDisplayTopology.IsRestorable)
+        .Select(m => new OtherDisplay(m.StableId, m.DeviceName, m.FriendlyName, m.Mode)).ToList();
 
     public Task SetModeAsync(uint displayId, DisplayModeInfo mode, bool permanently, CancellationToken ct = default)
     {
-        var target = DisplayConfigService.GetActiveMonitors().FirstOrDefault(m => m.StableId == displayId);
-        if (target is null) return Task.CompletedTask;
+        ct.ThrowIfCancellationRequested();
+        MonitorSnapshot? Other() => _topology.Active().FirstOrDefault(m => m.StableId == displayId && PhoneDisplayTopology.IsRestorable(m));
+        if (Other() is not { } target) return Task.CompletedTask;
         if (target.Mode.Width != mode.Width || target.Mode.Height != mode.Height || Math.Abs(target.Mode.RefreshRate - mode.RefreshRate) >= 1.0)
-            DisplayConfigService.SetResolution(target.DeviceName, mode.Width, mode.Height, mode.RefreshRate);
-        if (target.Mode.DpiScalePercent != mode.DpiScalePercent)
-            DisplayConfigService.SetDpiScalePercent(target.AdapterId, target.SourceId, mode.DpiScalePercent);
+            _topology.SetResolution(target, mode.Width, mode.Height, mode.RefreshRate);
+        if (Other() is { } after && mode.DpiScalePercent is { } wantDpi && after.Mode.DpiScalePercent != wantDpi)
+            _topology.SetScale(after, wantDpi);
         return Task.CompletedTask;
     }
 
-    private MonitorSnapshot? FindMonitor(uint displayId)
+    private static List<VddMode> BuildModes(ScreenFit fit) => fit.RegistrationOrder.Select(w =>
     {
-        if (!_deviceNames.TryGetValue(displayId, out var devName)) return null;
-        return DisplayConfigService.GetActiveMonitors()
-            .FirstOrDefault(m => m.DeviceName.Equals(devName, StringComparison.OrdinalIgnoreCase));
-    }
+        var (pw, ph) = fit.PixelSize(w);
+        return new VddMode((uint)pw, (uint)ph, [60]);
+    }).ToList();
 
-    private static List<VddMode> BuildModes(ScreenFit fit)
+    private static bool SameModes(ScreenFit first, ScreenFit second) =>
+        first.RegistrationOrder.Select(first.PixelSize).SequenceEqual(second.RegistrationOrder.Select(second.PixelSize));
+
+    private static PhoneScreenException Failed(string detail, bool isSafetyAbort = false) =>
+        new(PhoneScreenErrorKind.CreateFailed, detail, isSafetyAbort);
+
+    private static async Task<T?> PollAsync<T>(Func<T?> read, TimeSpan timeout, CancellationToken ct) where T : class
     {
-        // Register widest resolution first so Windows / driver brings landscape & hi-res screens online cleanly
-        var order = fit.RegistrationOrder;
-        var list = new List<VddMode>(order.Count);
-        foreach (int w in order)
+        var timer = Stopwatch.StartNew();
+        while (true)
         {
-            var (pxW, pxH) = fit.PixelSize(w);
-            list.Add(new VddMode((uint)pxW, (uint)pxH, [60]));
+            ct.ThrowIfCancellationRequested();
+            if (read() is { } result) return result;
+            var remaining = timeout - timer.Elapsed;
+            if (remaining <= TimeSpan.Zero) return null;
+            await Task.Delay(remaining.TotalMilliseconds < 100 ? remaining : TimeSpan.FromMilliseconds(100), ct).ConfigureAwait(false);
         }
-        return list;
-    }
-
-    private static async Task<MonitorSnapshot?> WaitForOnlineAsync(
-        HashSet<string> existingDevices,
-        int basePxW,
-        int basePxH,
-        TimeSpan timeout,
-        Func<IReadOnlyList<MonitorSnapshot>> getActiveMonitors,
-        Func<int, int, int, int, bool> tryAttachVirtual,
-        CancellationToken ct)
-    {
-        var sw = Stopwatch.StartNew();
-        while (sw.Elapsed < timeout && !ct.IsCancellationRequested)
-        {
-            var all = getActiveMonitors();
-            var newlyAdded = all.FirstOrDefault(m =>
-                !existingDevices.Contains(m.DeviceName)
-                && (m.DeviceString.Contains("Virtual", StringComparison.OrdinalIgnoreCase)
-                    || m.FriendlyName.Contains("Virtual", StringComparison.OrdinalIgnoreCase)
-                    || DisplayConfigService.HasDisplayMode(m.DeviceName, basePxW, basePxH)));
-
-            if (newlyAdded is not null)
-                return newlyAdded;
-
-            var anyNew = all.FirstOrDefault(m => !existingDevices.Contains(m.DeviceName));
-            if (anyNew is not null)
-                return anyNew;
-
-            int rightEdge = all.Count > 0 ? (int)all.Max(m => m.Bounds.MaxX) : 2560;
-            if (tryAttachVirtual(basePxW, basePxH, rightEdge, 0))
-            {
-                await Task.Delay(250, ct).ConfigureAwait(false);
-                var attached = getActiveMonitors().FirstOrDefault(m => !existingDevices.Contains(m.DeviceName));
-                if (attached is not null)
-                    return attached;
-            }
-
-            await Task.Delay(150, ct).ConfigureAwait(false);
-        }
-        return null;
-    }
-
-    private static async Task<bool> TryRestartVirtualDisplayDeviceAsync(CancellationToken ct)
-    {
-        try
-        {
-            string? instanceId = FindVirtualDisplayInstanceId();
-            if (string.IsNullOrEmpty(instanceId))
-            {
-                Log.Warn("未在 ROOT\\DISPLAY 注册表中找到 VirtualDisplayDriver 设备");
-                return false;
-            }
-
-            Log.Info($"正在执行 pnputil /restart-device \"{instanceId}\"...");
-            var psi = new ProcessStartInfo
-            {
-                FileName = "pnputil.exe",
-                Arguments = $"/restart-device \"{instanceId}\"",
-                CreateNoWindow = true,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true
-            };
-            using var proc = Process.Start(psi);
-            if (proc is null) return false;
-            await proc.WaitForExitAsync(ct).ConfigureAwait(false);
-            Log.Info($"pnputil /restart-device 退出码={proc.ExitCode}");
-
-            var sw = Stopwatch.StartNew();
-            while (sw.Elapsed < TimeSpan.FromSeconds(5) && !ct.IsCancellationRequested)
-            {
-                if (VirtualDisplayIpcClient.IsDriverPipeAvailable())
-                    return true;
-                await Task.Delay(200, ct).ConfigureAwait(false);
-            }
-        }
-        catch (Exception ex)
-        {
-            Log.Warn($"自动重启虚拟屏设备失败：{ex.Message}");
-        }
-        return false;
-    }
-
-    private static string? FindVirtualDisplayInstanceId()
-    {
-        try
-        {
-            using var root = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Enum\ROOT\DISPLAY");
-            if (root is null) return null;
-
-            foreach (string sub in root.GetSubKeyNames())
-            {
-                using var dev = root.OpenSubKey(sub);
-                if (dev is null) continue;
-                var hwIds = dev.GetValue("HardwareID") as string[];
-                if (hwIds is not null && hwIds.Any(id => id.Contains("VirtualDisplayDriver", StringComparison.OrdinalIgnoreCase)))
-                    return $@"ROOT\DISPLAY\{sub}";
-            }
-        }
-        catch (Exception ex)
-        {
-            Log.Warn($"读取 ROOT\\DISPLAY 注册表失败：{ex.Message}");
-        }
-        return null;
     }
 
     public ValueTask DisposeAsync() => _ipc.DisposeAsync();

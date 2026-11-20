@@ -14,6 +14,7 @@ public enum PhoneScreenPhase
     Off,
     Preparing,
     Ready,
+    Suspended,
     Failed
 }
 
@@ -85,6 +86,8 @@ public sealed class PhoneDesk
     private const double StalledFollow = 60.0;
     private const double StalledPoll = 1.0;
     private const double ReplaceWait = 10.0;
+    private const double DisplayRecoveryDebounce = 1.0;
+    private static readonly double[] DisplayRecoveryDelays = [5.0, 15.0, 30.0];
 
     private readonly IPhoneDisplays _displays;
     private readonly IWindowControl _windows;
@@ -109,6 +112,12 @@ public sealed class PhoneDesk
     private bool _settling;
     private Placement? _placement;
     private int _recheckGeneration;
+    private Task? _pendingRecheckTask;
+    private double? _offlineSince;
+    private double _offlineRetryAt;
+    private int _offlineAttempts;
+    private bool _offlineRebuildUsed;
+    private bool _recoveringDisplay;
     private CancellationTokenSource? _pendingRetryCts;
     private Task? _pendingRetryTask;
     private int _failures;
@@ -219,8 +228,14 @@ public sealed class PhoneDesk
         Begin(new DeskWork(DeskWorkKind.Placing, window.Label));
         _ = _lane.Run(async () =>
         {
-            await PlaceAsync(window, zoom: true, transferFromOtherScreen);
-            State = State with { Work = null };
+            try
+            {
+                await PlaceAsync(window, zoom: true, transferFromOtherScreen);
+            }
+            finally
+            {
+                State = State with { Work = null };
+            }
         });
     }
 
@@ -452,9 +467,9 @@ public sealed class PhoneDesk
     public void DisplaysChanged()
     {
         SettleDisplays();
-        if (_display is null) return;
+        if (_display is null && State.ScreenPhase != PhoneScreenPhase.Suspended) return;
         int gen = ++_recheckGeneration;
-        _ = Task.Run(async () =>
+        _pendingRecheckTask = Task.Run(async () =>
         {
             await _timeline.SleepAsync(RecheckDelay);
             if (gen != _recheckGeneration) return;
@@ -505,6 +520,28 @@ public sealed class PhoneDesk
 
     public void SettleDisplays()
     {
+        if (_wanted && !State.Dismissed && !_recoveringDisplay)
+        {
+            bool retryCreate = _display is null
+                && State.ScreenPhase == PhoneScreenPhase.Suspended
+                && !_displays.IsRemoteExclusiveDisplayActive();
+            bool checkDisplay = _display is not null
+                && State.ScreenPhase is PhoneScreenPhase.Ready or PhoneScreenPhase.Suspended;
+            if (retryCreate || checkDisplay)
+            {
+                _recoveringDisplay = true;
+                _ = _lane.Run(async () =>
+                {
+                    try
+                    {
+                        if (_display is null) await ReconcileAsync();
+                        else await RecoverOfflineDisplayAsync();
+                    }
+                    finally { _recoveringDisplay = false; }
+                });
+            }
+        }
+
         if ((_retiring is null && !_persistOwed) || _settling) return;
         _settling = true;
         _ = _lane.Run(async () =>
@@ -570,23 +607,109 @@ public sealed class PhoneDesk
             {
                 try { await retry; } catch { }
             }
+            var recheck = _pendingRecheckTask;
+            if (recheck is not null)
+            {
+                try { await recheck; } catch { }
+            }
             await _lane.DrainAsync();
-            if (ReferenceEquals(_pendingRetryTask, retry) && _watches.Count == 0)
+            if (ReferenceEquals(_pendingRetryTask, retry)
+                && ReferenceEquals(_pendingRecheckTask, recheck)
+                && _watches.Count == 0)
                 break;
         }
     }
 
     private async Task ReconcileAsync()
     {
-        bool on = _wanted && !State.Dismissed;
-        if (on && _display is null)
+        if (!_wanted || State.Dismissed)
+        {
+            if (State.ScreenPhase != PhoneScreenPhase.Off) await RemoveScreenAsync();
+        }
+        else if (_display is null)
+        {
             await AddScreenAsync();
-        else if (!on && State.ScreenPhase != PhoneScreenPhase.Off)
-            await RemoveScreenAsync();
+        }
+    }
+
+    private async Task RecoverOfflineDisplayAsync()
+    {
+        if (!_wanted || State.Dismissed || _display is not { } current
+            || State.ScreenPhase is not (PhoneScreenPhase.Ready or PhoneScreenPhase.Suspended)) return;
+
+        bool online = _displays.IsAttachedToDesktop(current.Id);
+        if (online && _offlineSince is null) return;
+
+        if (!online)
+        {
+            if (_offlineSince is null)
+            {
+                _offlineSince = _timeline.Now;
+                Log.Warn($"虚拟屏「{_screenName}」#{current.Id} 已脱离活动桌面，暂停使用");
+                State = State with { ScreenPhase = PhoneScreenPhase.Suspended };
+            }
+            if (_displays.IsRemoteExclusiveDisplayActive()
+                || _timeline.Now - _offlineSince.Value < DisplayRecoveryDebounce
+                || _timeline.Now < _offlineRetryAt
+                || _offlineAttempts > DisplayRecoveryDelays.Length)
+                return;
+
+            try
+            {
+                await _displays.TryReactivateAsync(current.Id, WantedWidth);
+                online = _displays.IsAttachedToDesktop(current.Id);
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"虚拟屏「{_screenName}」#{current.Id} 恢复失败：{ex.Message}");
+            }
+            if (!_wanted || State.Dismissed) return;
+            if (!online)
+            {
+                if (_displays.IsRemoteExclusiveDisplayActive()) return;
+                if (_offlineAttempts < DisplayRecoveryDelays.Length)
+                {
+                    double delay = DisplayRecoveryDelays[_offlineAttempts++];
+                    _offlineRetryAt = _timeline.Now + delay;
+                    Log.Warn($"虚拟屏「{_screenName}」#{current.Id} 尚未恢复；{delay:0} 秒后重试");
+                }
+                else if (!_offlineRebuildUsed)
+                {
+                    _offlineRebuildUsed = true;
+                    Log.Warn($"虚拟屏「{_screenName}」#{current.Id} 无法回接，撤掉旧记录并重新创建");
+                    await RemoveScreenAsync(resetRebuildBudget: false);
+                    if (_wanted && !State.Dismissed) await AddScreenAsync();
+                }
+                else
+                {
+                    _offlineAttempts++;
+                    Log.Warn($"虚拟屏「{_screenName}」#{current.Id} 未能恢复，本次连接停止重试");
+                }
+                return;
+            }
+        }
+
+        _offlineSince = null;
+        _offlineAttempts = 0;
+        _offlineRetryAt = 0;
+        State = State with { ScreenPhase = PhoneScreenPhase.Ready };
+        Log.Info($"虚拟屏「{_screenName}」#{current.Id} 已恢复到活动桌面");
+        if (State.ListVisible) await MatchWidthAsync();
+        else await RefillAsync("虚拟屏恢复后重新铺满");
     }
 
     private async Task AddScreenAsync()
     {
+        if (_displays.IsRemoteExclusiveDisplayActive())
+        {
+            if (State.ScreenPhase != PhoneScreenPhase.Suspended)
+                Log.Info("UU 超级屏独占桌面，暂停创建虚拟屏");
+            State = State with { ScreenPhase = PhoneScreenPhase.Suspended, DisplayId = null };
+            return;
+        }
+        _offlineSince = null;
+        _offlineAttempts = 0;
+        _offlineRetryAt = 0;
         State = State with { ScreenPhase = PhoneScreenPhase.Preparing };
         if (_retiring is { } old)
         {
@@ -613,6 +736,13 @@ public sealed class PhoneDesk
         {
             State = State with { ScreenPhase = PhoneScreenPhase.Failed, DisplayId = null };
             Log.Error($"加手机屏失败：{ex.Message}");
+            var nowOtherIds = _displays.OtherDisplays().Select(o => o.DisplayId).ToHashSet();
+            bool lostOther = before.Others.Any(o => !nowOtherIds.Contains(o.DisplayId));
+            if (lostOther || ex is PhoneScreenException { IsSafetyAbort: true })
+            {
+                Log.Error("检测到显示拓扑异常（原有显示器丢失或身份安全中止），停止本次会话加屏重试");
+                return;
+            }
             ScheduleRetry();
         }
     }
@@ -633,7 +763,8 @@ public sealed class PhoneDesk
         {
             await _timeline.SleepAsync(delay, cts.Token);
             if (cts.IsCancellationRequested) return;
-            await _lane.Run(ReconcileAsync);
+            // A reshape can invalidate the retry while it waits on the shared lane.
+            await _lane.Run(() => cts.IsCancellationRequested ? Task.CompletedTask : ReconcileAsync());
         });
     }
 
@@ -645,8 +776,12 @@ public sealed class PhoneDesk
         if (resetFailures) _failures = 0;
     }
 
-    private async Task RemoveScreenAsync()
+    private async Task RemoveScreenAsync(bool resetRebuildBudget = true)
     {
+        _offlineSince = null;
+        _offlineAttempts = 0;
+        _offlineRetryAt = 0;
+        if (resetRebuildBudget) _offlineRebuildUsed = false;
         if (_placement is { } p) await PutBackAsync(p.Record);
         SetPlacement(null);
         await EvacuateComputerScreenWindowsAsync();
@@ -710,13 +845,13 @@ public sealed class PhoneDesk
         if (offline)
         {
             await SettleAsync(pending.Before, "撤屏", pending.Permanently);
+            Log.Info($"已撤掉手机屏 #{d.Id}");
         }
         else
         {
             _retiring = pending;
             Log.Info($"手机屏 #{d.Id} 尚未下线，稍后自动善后");
         }
-        Log.Info($"已撤掉手机屏 #{d.Id}");
     }
 
     private async Task<Surroundings> CaptureSurroundingsAsync(string beforeWhat)
@@ -733,7 +868,9 @@ public sealed class PhoneDesk
         var drifted = new List<(OtherDisplay Was, DisplayModeInfo Now)>();
         foreach (var was in before.Others)
         {
-            if (nowMap.TryGetValue(was.DisplayId, out var cur) && !cur.IsSameAs(was.Mode))
+            if (!nowMap.TryGetValue(was.DisplayId, out var cur))
+                Log.Warn($"{afterWhat}后原显示器 {was.FriendlyName} 不在活动桌面中");
+            else if (!cur.IsSameAs(was.Mode))
                 drifted.Add((was, cur));
         }
 
@@ -752,8 +889,7 @@ public sealed class PhoneDesk
     {
         if (!await _displays.ReshapeAsync(id, Fit))
         {
-            Log.Warn($"手机屏 #{id} 没能换成新比例（{Fit}），下次加屏时按新的建");
-            State = State with { Notice = new DeskNotice.ReshapeFailed() };
+            await HandleReshapeFailureAsync(id);
             return;
         }
         State = State with { Notice = new DeskNotice.Reshaped() };
@@ -768,8 +904,52 @@ public sealed class PhoneDesk
         SetPlacement(p);
     }
 
+    private async Task HandleReshapeFailureAsync(uint id)
+    {
+        var notice = new DeskNotice.ReshapeFailed();
+        if (_displays.IsOnline(id) && _displays.FitOf(id) is not null && _displays.BoundsOf(id) is not null)
+        {
+            Log.Warn($"手机屏 #{id} 没能换成新比例（{Fit}），下次加屏时按新的建");
+            State = State with { Notice = notice };
+            return;
+        }
+
+        Log.Warn($"手机屏 #{id} 换比例失败，原屏已不在线或不可用，重新启用时再建");
+        CancelRetry();
+        var record = _placement?.Record;
+        if (_displays.IsOnline(id))
+            await RetireDisplayAsync();
+        _display = null;
+        _placement = null;
+        _replaced = null;
+        State = State with
+        {
+            ScreenPhase = PhoneScreenPhase.Failed,
+            DisplayId = null,
+            Placed = null,
+            CloseButton = null,
+            ListVisible = true,
+            Notice = notice
+        };
+        if (record is not null) await RecoverRecordAsync(record);
+    }
+
     private async Task RecheckAsync()
     {
+        if (_wanted && !State.Dismissed)
+        {
+            if (_display is null && State.ScreenPhase == PhoneScreenPhase.Suspended)
+            {
+                await ReconcileAsync();
+                return;
+            }
+            if (_display is { } current
+                && (!_displays.IsAttachedToDesktop(current.Id) || State.ScreenPhase == PhoneScreenPhase.Suspended))
+            {
+                await RecoverOfflineDisplayAsync();
+                return;
+            }
+        }
         if (State.ListVisible) await MatchWidthAsync();
         else await RefillAsync("屏幕配置变了");
     }
@@ -798,15 +978,24 @@ public sealed class PhoneDesk
         return SwitchWidthAsync(d.Id, WantedWidth);
     }
 
-    private async Task SwitchWidthAsync(uint id, int width)
+    private async Task<bool> SwitchWidthAsync(uint id, int width)
     {
-        if (_displays.WidthOf(id) != width)
+        if (_displays.WidthOf(id) == width) return true;
+        try
+        {
             await _displays.SetWidthAsync(id, width);
+            return true;
+        }
+        catch (PhoneScreenException ex)
+        {
+            Log.Warn($"手机屏 #{id} 切换 {width} 宽失败：{ex.Message}");
+            return false;
+        }
     }
 
     private async Task<RectD?> FillAsync(Placement p, uint id)
     {
-        await SwitchWidthAsync(id, p.Width);
+        if (!await SwitchWidthAsync(id, p.Width)) return null;
         if (_displays.WindowAreaOf(id) is not { } area) return null;
         if (await _windows.MoveAsync(p.Window.Key, area) is not { } got) return null;
 
@@ -1262,16 +1451,20 @@ public sealed class PhoneDesk
         return null;
     }
 
-    private async Task<PhoneRecord?> PutBackLeftoverAsync()
+    private Task<PhoneRecord?> PutBackLeftoverAsync() =>
+        _placement is null && _ledger.Pending() is { } record
+            ? RecoverRecordAsync(record)
+            : Task.FromResult<PhoneRecord?>(null);
+
+    private async Task<PhoneRecord?> RecoverRecordAsync(PhoneRecord record)
     {
-        if (_placement is not null || _ledger.Pending() is not { } record) return null;
         if (!await _windows.ExistsAsync(record.Window))
         {
             Log.Info($"还原记录里的 {record.Label} 已经不在了，等它回来再还");
             await LeaveBehindAsync(record);
             return null;
         }
-        Log.Info($"{record.Label} 上次没放回去，现在放回 {record.Original.Short}");
+        Log.Info($"按还原记录把 {record.Label} 放回 {record.Original.Short}");
         return await PutBackAsync(record);
     }
 

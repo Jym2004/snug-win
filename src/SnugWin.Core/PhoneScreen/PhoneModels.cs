@@ -71,6 +71,18 @@ public sealed record PhoneScreenSpecData(
     [JsonIgnore]
     public bool IsValid => Width > 0 && Height > 0 && Width <= Height && (Points ?? 1) > 0 && (Notch ?? 0) >= 0;
 
+    /// <summary>
+    /// Catalog and config store short-edge first; UI renders and edits width × height in screen orientation.
+    /// </summary>
+    public (int Width, int Height) Dimensions(ScreenOrientation orientation) =>
+        orientation == ScreenOrientation.Portrait ? (Width, Height) : (Height, Width);
+
+    public string SizeText(ScreenOrientation orientation = ScreenOrientation.Portrait)
+    {
+        var (w, h) = Dimensions(orientation);
+        return $"{w} × {h}";
+    }
+
     public static PhoneScreenSpecData? Custom(int? a, int? b)
     {
         if (a is null || b is null) return null;
@@ -99,7 +111,7 @@ public sealed record PhoneChoice(
         DeviceKind.Phone);
 
     public static readonly PhoneChoice StandardTablet = new(
-        "Apple iPad Pro 11 (M4)",
+        "Apple iPad Pro 11 英寸（M4）",
         new PhoneScreenSpecData(1668, 2420, 834),
         DeviceKind.Tablet);
 
@@ -127,15 +139,19 @@ public sealed class PhoneCatalog
         public string SectionId => $"{Kind}/{Name}";
     }
 
-    public static readonly PhoneCatalog Empty = new(Array.Empty<Brand>());
+    public static readonly PhoneCatalog Empty = new(
+        Array.Empty<Brand>(),
+        new Dictionary<string, PhoneModel>(StringComparer.Ordinal));
 
     public IReadOnlyList<Brand> Brands { get; }
+    private readonly IReadOnlyDictionary<string, PhoneModel> _modelsById;
 
     public IEnumerable<PhoneModel> Models => Brands.SelectMany(b => b.Models);
 
-    private PhoneCatalog(IReadOnlyList<Brand> brands)
+    private PhoneCatalog(IReadOnlyList<Brand> brands, IReadOnlyDictionary<string, PhoneModel> modelsById)
     {
         Brands = brands;
+        _modelsById = modelsById;
     }
 
     public static PhoneCatalog FromJson(string json)
@@ -157,29 +173,31 @@ public sealed class PhoneCatalog
             throw new PhoneCatalogException("内容为空");
 
         var seenModels = new HashSet<string>(StringComparer.Ordinal);
+        var modelsById = new Dictionary<string, PhoneModel>(StringComparer.Ordinal);
         var result = new List<Brand>();
 
         // Upstream v2.6 device-models.json schema: { "phone": [...], "tablet": [...], "computer": [...] }
         if (file.Phone is not null || file.Tablet is not null || file.Computer is not null)
         {
-            ParseSection(file.Phone, DeviceKind.Phone, seenModels, result);
-            ParseSection(file.Tablet, DeviceKind.Tablet, seenModels, result);
-            ParseSection(file.Computer, DeviceKind.Computer, seenModels, result);
-            return new PhoneCatalog(result);
+            ParseSection(file.Phone, DeviceKind.Phone, seenModels, modelsById, result);
+            ParseSection(file.Tablet, DeviceKind.Tablet, seenModels, modelsById, result);
+            ParseSection(file.Computer, DeviceKind.Computer, seenModels, modelsById, result);
+            return new PhoneCatalog(result, modelsById);
         }
 
         // Legacy phone-models.json schema: { "brands": [...] }
         if (file.Brands is null)
             throw new PhoneCatalogException("缺少 phone / brands 字段");
 
-        ParseSection(file.Brands, DeviceKind.Phone, seenModels, result);
-        return new PhoneCatalog(result);
+        ParseSection(file.Brands, DeviceKind.Phone, seenModels, modelsById, result);
+        return new PhoneCatalog(result, modelsById);
     }
 
     private static void ParseSection(
         List<RawBrand>? section,
         DeviceKind kind,
         HashSet<string> seenModels,
+        Dictionary<string, PhoneModel> modelsById,
         List<Brand> output)
     {
         if (section is null) return;
@@ -201,11 +219,21 @@ public sealed class PhoneCatalog
 
                 var screen = new PhoneScreenSpecData(entry.Screen[0], entry.Screen[1], entry.Points, entry.Notch);
                 var model = new PhoneModel(rawBrand.Name, entry.Name ?? string.Empty, screen, kind);
-                if (string.IsNullOrEmpty(entry.Name) || !screen.IsValid)
+                if (!screen.IsValid)
                     throw new PhoneCatalogException($"{model.Id}：分辨率要是正数、短边在前");
 
-                if (!seenModels.Add(Normalize($"{kind}/{model.Id}")))
-                    throw new PhoneCatalogException($"{model.Id}：重复了");
+                var allNames = entry.LegacyNames is { Count: > 0 }
+                    ? new[] { entry.Name ?? string.Empty }.Concat(entry.LegacyNames)
+                    : [entry.Name ?? string.Empty];
+                foreach (string rawName in allNames)
+                {
+                    if (string.IsNullOrEmpty(Normalize(rawName)))
+                        throw new PhoneCatalogException($"{model.Id}：型号名不能为空");
+                    string fullId = $"{rawBrand.Name} {rawName}";
+                    if (!seenModels.Add(Normalize($"{kind}/{fullId}")))
+                        throw new PhoneCatalogException($"{fullId}：重复了");
+                    modelsById.TryAdd(fullId, model);
+                }
 
                 models.Add(model);
             }
@@ -223,8 +251,12 @@ public sealed class PhoneCatalog
         return Brands.Where(b => set.Contains(b.Kind)).ToList();
     }
 
-    public PhoneModel? FindModel(string id, DeviceKind? kind = null) =>
-        Models.FirstOrDefault(m => m.Id == id && (kind is null || m.Kind == kind.Value));
+    public PhoneModel? FindModel(string id, DeviceKind? kind = null)
+    {
+        if (_modelsById.TryGetValue(id, out var indexed) && (kind is null || indexed.Kind == kind.Value))
+            return indexed;
+        return Models.FirstOrDefault(m => m.Id == id && (kind is null || m.Kind == kind.Value));
+    }
 
     public PhoneChoice Resolve(PhoneChoice choice)
     {
@@ -280,6 +312,7 @@ public sealed class PhoneCatalog
     private sealed class RawModel
     {
         public string? Name { get; set; }
+        public List<string>? LegacyNames { get; set; }
         public List<int>? Screen { get; set; }
         public int? Points { get; set; }
         public int? Notch { get; set; }

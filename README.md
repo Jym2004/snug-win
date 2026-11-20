@@ -142,6 +142,10 @@ UU远程 手机端沿用触控板鼠标逻辑；SnugWin 通过独立高优先级
 4. 首次使用可在 App 资源库右上角选择手机机型比例（换比例后在 UU 侧切一次屏再切回即可精确对齐点按坐标）；
 5. 轻点 App 或窗口开始使用；断开远程连接后，SnugWin 自动把窗口还原回原位、恢复字号并撤除虚拟屏。
 
+**固定竖屏像素（可选）**：选好「小米 15 Ultra」并退出 SnugWin，在 `%LocalAppData%\SnugWin\config.json` 的 `Screens` 数组中，仅给该手机竖屏条目加上 `"fixedNativePixels": true`，保存后重启。Windows 虚拟屏只请求 **1440 × 3200**，不随窗口内容改宽；删除该项或设为 `false` 即恢复默认 UU 工具栏适配。此选项不设置 UU 的传输分辨率或码率。
+
+固定模式仅适用于手机竖屏：宽 480–2160、高 800–4320 像素，宽高均为偶数，长边不超过短边的 3 倍。仅填比例（如 9 × 20）或超出固定模式范围时仍按默认策略适配；缺少宽高或宽高无效的条目不建屏。
+
 ---
 
 ## 🔒 隔离与还原
@@ -198,7 +202,8 @@ dotnet publish src\SnugWin.App\SnugWin.App.csproj -c Release -r win-x64 --self-c
 同样感谢以下项目与社区工作：
 
 * [**zephyr4123/snug**](https://github.com/zephyr4123/snug)（MIT License）：AoyamaShou 与 zephyr4123，提供全部产品理念、核心状态机模型、双屏叠片图标设计及机型库数据集；
-* [**MolotovCherry/virtual-display-rs**](https://github.com/MolotovCherry/virtual-display-rs)（MIT License）：Windows IddCx 虚拟显示器驱动与命名管道服务。
+* [**MolotovCherry/virtual-display-rs**](https://github.com/MolotovCherry/virtual-display-rs)（MIT License）：Windows IddCx 虚拟显示器驱动与命名管道服务；
+* **社区贡献者**：感谢 [@WilliamLambertCN](https://github.com/WilliamLambertCN)（PR #1：EDID 虚拟屏身份绑定、IPC 加固、固定竖屏像素与会话采样稳定性）与 [@Jym2004](https://github.com/Jym2004)（PR #2：UIA 控制端读取与离屏唤醒、桌面端筛选、虚拟屏离线恢复与超级屏让路）。
 
 ---
 

@@ -209,9 +209,9 @@ public sealed class AppController : ILogSink
         if (_shuttingDown || System.Threading.Interlocked.Exchange(ref _sampling, 1) == 1) return;
         try
         {
-            var now = DateTimeOffset.Now;
             _screenshots.Expire();
-            var signals = await Task.Run(() => _sensor.Sample(now));
+            bool wasConnected = _session.IsConnected;
+            var (signals, now) = await Task.Run(() => _sensor.Sample(wasConnected));
             if (_shuttingDown) return;
 
             var transitions = _session.Update(signals, now);
@@ -221,7 +221,9 @@ public sealed class AppController : ILogSink
                 BringCursorHome(includePersistentMain: true);
 
             bool remote = _session.InEpisode || _sensor.ManualOverride;
-            _desks.SetWishes(ScreenPlan.Wishes(_config, remote));
+            bool wantsTouch = signals.ManualOverride
+                              || ControllerClassifier.WantsPhoneScreen(_session.EpisodeControllers(now));
+            _desks.SetWishes(ScreenPlan.ForController(ScreenPlan.Wishes(_config, remote), wantsTouch, remote));
             _desks.SetRemote(_session.InEpisode);
 
             if ((now - _lastVerifyAt).TotalSeconds >= 2.0)
@@ -233,12 +235,7 @@ public sealed class AppController : ILogSink
             }
 
             bool watching = remote || (_previewHomeWindow is { IsVisible: true });
-            bool showAnyList = watching && _desks.Wishes.Any(w =>
-                w.IsTouch
-                && _desks.StateOf(w.Id) is { ScreenPhase: PhoneScreenPhase.Ready } dst
-                && (dst.ListVisible || dst.Placed is null)
-                && dst.Work is null);
-            if (showAnyList && (now - _lastCatalogRefresh).TotalSeconds >= 1.5)
+            if (ShouldRefreshRunningApps(now, watching))
             {
                 _lastCatalogRefresh = now;
                 await RefreshRunningAppsAsync();
@@ -254,6 +251,13 @@ public sealed class AppController : ILogSink
             System.Threading.Interlocked.Exchange(ref _sampling, 0);
         }
     }
+
+    private bool ShouldRefreshRunningApps(DateTimeOffset now, bool watching) =>
+        watching && (now - _lastCatalogRefresh).TotalSeconds >= 1.5 && _desks.Wishes.Any(w =>
+            w.IsTouch
+            && _desks.StateOf(w.Id) is { ScreenPhase: PhoneScreenPhase.Ready } dst
+            && (dst.ListVisible || dst.Placed is null)
+            && dst.Work is null);
 
     public void RefreshRunningApps() => _ = RefreshRunningAppsAsync();
 
@@ -931,7 +935,7 @@ public sealed class AppController : ILogSink
         if (_session.EndNow() is null) return;
         BringCursorHome(includePersistentMain: true);
         bool remote = _session.InEpisode || _sensor.ManualOverride;
-        _desks.SetWishes(ScreenPlan.Wishes(_config, remote));
+        _desks.SetWishes(ScreenPlan.ForController(ScreenPlan.Wishes(_config, remote), _sensor.ManualOverride, remote));
         _desks.SetRemote(_session.InEpisode);
         NotifySummary();
         UiStateChanged?.Invoke();
@@ -1146,6 +1150,9 @@ public sealed class AppController : ILogSink
             return "正在创建虚拟屏...";
         if (_desks.Wishes.Any(w => _desks.StateOf(w.Id)?.ScreenPhase == PhoneScreenPhase.Failed))
             return "建屏失败（重试中）";
+        int suspendedCount = _desks.Wishes.Count(w => _desks.StateOf(w.Id)?.ScreenPhase == PhoneScreenPhase.Suspended);
+        if (suspendedCount > 0)
+            return $"远程中（{suspendedCount} 块屏等待显示布局恢复）";
         if (_desks.HasAnyDismissedTouch && _session.InEpisode)
             return "远程中（已退出触屏）";
         return _session.IsConnected ? "远程中" : "待机中";

@@ -29,6 +29,32 @@ public sealed class MultiScreenSyncTests : IDisposable
     }
 
     [Fact]
+    public void ForController_KeepsOnlyMatchingScreensWhileExemptingPersistentMain()
+    {
+        var touch = new ScreenWish("t", "Phone", PhoneChoice.Standard, ScreenOrientation.Portrait,
+            ScreenFit.Standard, ScreenBehavior.TouchScreen);
+        var computer = new ScreenWish("c", "Laptop", PhoneChoice.Standard, ScreenOrientation.Landscape,
+            ScreenFit.Standard, ScreenBehavior.Computer);
+        var mainTouch = touch with { Id = "m", IsMain = true };
+
+        var forPhone = ScreenPlan.ForController([touch, computer], wantsTouch: true);
+        Assert.Equal(["t"], forPhone.Select(w => w.Id));
+
+        var forDesktop = ScreenPlan.ForController([touch, computer], wantsTouch: false);
+        Assert.Equal(["c"], forDesktop.Select(w => w.Id));
+
+        // Do not leak a phone screen to a desktop controller when only phone screens are configured.
+        Assert.Empty(ScreenPlan.ForController([touch], wantsTouch: false));
+        Assert.Single(ScreenPlan.ForController([touch], wantsTouch: true));
+        Assert.Single(ScreenPlan.ForController([computer], wantsTouch: false));
+        Assert.Empty(ScreenPlan.ForController([computer], wantsTouch: true));
+
+        // Persistent main screen and non-remote standby must never be dropped.
+        Assert.Equal(["m", "c"], ScreenPlan.ForController([mainTouch, touch, computer], wantsTouch: false).Select(w => w.Id));
+        Assert.Equal(["m"], ScreenPlan.ForController([mainTouch], wantsTouch: false, remote: false).Select(w => w.Id));
+    }
+
+    [Fact]
     public void PhoneCatalog_LoadsUpstreamDeviceModelsJson_HasPhoneTabletComputer()
     {
         string path = Path.Combine(AppContext.BaseDirectory, "Assets", "device-models.json");

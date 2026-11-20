@@ -66,6 +66,8 @@ public partial class SettingsWindow : Window
         string StatusLabel,
         bool Enabled,
         string MainActionLabel,
+        string OtherOrientationLabel,
+        Visibility OtherOrientationVisibility,
         Visibility MainBadgeVisibility,
         Visibility ReadyBadgeVisibility,
         Visibility PreviewVisibility,
@@ -161,11 +163,11 @@ public partial class SettingsWindow : Window
             ManualPhoneCheck.IsChecked = _controller.ManualOverride;
             AutoCheckUpdatesCheck.IsChecked = cfg.AutoCheckUpdates;
 
-            var primaryCfg = _controller.GetScreenConfig(_controller.PrimaryTouchScreenId);
-            var primaryDevice = primaryCfg?.Device ?? cfg.Phone;
-            var primaryOrient = primaryCfg?.Orientation ?? SnugWin.Core.PhoneScreen.ScreenOrientation.Portrait;
+            var primaryCfg = _controller.GetScreenConfig(_controller.PrimaryTouchScreenId)
+                ?? new ScreenConfig { Device = cfg.Phone };
+            var primaryDevice = primaryCfg.Device;
             PhoneModelText.Text = primaryDevice.Model ?? "自定义比例";
-            var fit = ScreenFit.FromDevice(primaryDevice.Screen, primaryDevice.Kind, primaryOrient);
+            var fit = ScreenPlan.FitOf(primaryCfg);
             var (pxW, pxH) = fit.PixelSize(fit.BaseWidth);
             PhoneSpecText.Text = $"{pxW} × {pxH} · {fit.TargetDpiPercent(fit.BaseWidth)}%";
             double ratio = (double)pxW / Math.Max(1, pxH);
@@ -318,8 +320,8 @@ public partial class SettingsWindow : Window
         {
             var state = _controller.GetScreenState(s.Id);
             string kindLabel = s.Device.Kind.DisplayName();
-            string orientLabel = s.Orientation == SnugWin.Core.PhoneScreen.ScreenOrientation.Landscape ? "横屏" : "竖屏";
-            var fit = ScreenFit.FromDevice(s.Device.Screen, s.Device.Kind, s.Orientation);
+            string orientLabel = s.Orientation.DisplayName();
+            var fit = ScreenPlan.FitOf(s);
             var (pxW, pxH) = fit.PixelSize(fit.BaseWidth);
             string summary = $"{s.Device.Model ?? "自定义"} · {pxW} × {pxH}";
             string status = state.ScreenPhase switch
@@ -330,6 +332,7 @@ public partial class SettingsWindow : Window
                 _ => s.Enabled ? "待命" : "已停用"
             };
             bool isMain = string.Equals(_controller.MainScreenId, s.Id, StringComparison.OrdinalIgnoreCase);
+            var (otherLabel, otherVisibility) = FormatOtherOrientationAction(_controller.Config.OtherOrientation(s));
             rows.Add(new ScreenRowItem(
                 Id: s.Id,
                 Name: s.Name,
@@ -338,6 +341,8 @@ public partial class SettingsWindow : Window
                 StatusLabel: status,
                 Enabled: s.Enabled,
                 MainActionLabel: isMain ? "取消常驻" : "设为常驻",
+                OtherOrientationLabel: otherLabel,
+                OtherOrientationVisibility: otherVisibility,
                 MainBadgeVisibility: isMain ? Visibility.Visible : Visibility.Collapsed,
                 ReadyBadgeVisibility: state.ScreenPhase == PhoneScreenPhase.Ready ? Visibility.Visible : Visibility.Collapsed,
                 PreviewVisibility: s.Device.Kind.IsTouch() ? Visibility.Visible : Visibility.Collapsed,
@@ -415,6 +420,41 @@ public partial class SettingsWindow : Window
             _controller.SetMainScreen(id);
     }
 
+    private static (string Label, Visibility Visibility) FormatOtherOrientationAction(AppConfig.OtherOrientationResult? other) =>
+        other switch
+        {
+            AppConfig.OtherOrientationResult.Add add =>
+                ($"添加{add.Orientation.DisplayName()}", Visibility.Visible),
+            AppConfig.OtherOrientationResult.Existing existing when !existing.Screen.Enabled =>
+                ($"启用{existing.Screen.Orientation.DisplayName()}", Visibility.Visible),
+            _ => (string.Empty, Visibility.Collapsed)
+        };
+
+    private void OnUseOtherOrientationClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.Button { Tag: string id }) return;
+        ScreenConfig? screen = null;
+        foreach (var candidate in _controller.ConfiguredScreens)
+        {
+            if (string.Equals(candidate.Id, id, StringComparison.OrdinalIgnoreCase))
+            {
+                screen = candidate;
+                break;
+            }
+        }
+        if (screen is null) return;
+
+        switch (_controller.Config.OtherOrientation(screen))
+        {
+            case AppConfig.OtherOrientationResult.Add add:
+                _controller.AddScreen(add.Orientation, screen.Device);
+                break;
+            case AppConfig.OtherOrientationResult.Existing existing when !existing.Screen.Enabled:
+                _controller.SetScreenEnabled(existing.Screen.Id, true);
+                break;
+        }
+    }
+
     private void OnDeleteScreenClick(object sender, RoutedEventArgs e)
     {
         if (sender is System.Windows.Controls.Button { Tag: string id })
@@ -435,7 +475,8 @@ public partial class SettingsWindow : Window
             screenId: null,
             allowedKinds: new HashSet<DeviceKind> { kind },
             selectionOnly: true,
-            customTitle: $"选择{kind.DisplayName()}型号（{(orientation == SnugWin.Core.PhoneScreen.ScreenOrientation.Landscape ? "横屏" : "竖屏")}）")
+            customTitle: $"选择{kind.DisplayName()}型号（{orientation.DisplayName()}）",
+            orientation: orientation)
         {
             Owner = this
         };
