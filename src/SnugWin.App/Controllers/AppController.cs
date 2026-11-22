@@ -85,6 +85,8 @@ public sealed class AppController : ILogSink
                ?? _config.PrimaryTouchScreen();
     }
     public bool ManualOverride => _sensor.ManualOverride;
+    public ManualRemoteScreenMode ManualRemoteMode { get; private set; }
+    public bool RustDeskManualModeEnabled => ManualRemoteMode != ManualRemoteScreenMode.Off;
     public bool CatalogLoaded => _catalogLoaded;
     public string CurrentVersion => AppUpdateService.CurrentVersion;
     public ReleasePackageKind PackageKind => AppUpdateService.CurrentPackageKind;
@@ -220,11 +222,20 @@ public sealed class AppController : ILogSink
             if (interrupted || ended)
                 BringCursorHome(includePersistentMain: true);
 
-            bool remote = _session.InEpisode || _sensor.ManualOverride;
-            bool wantsTouch = signals.ManualOverride
-                              || ControllerClassifier.WantsPhoneScreen(_session.EpisodeControllers(now));
-            _desks.SetWishes(ScreenPlan.ForController(ScreenPlan.Wishes(_config, remote), wantsTouch, remote));
-            _desks.SetRemote(_session.InEpisode);
+            var configuredWishes = ScreenPlan.Wishes(_config, remote: true);
+            var standbyWishes = ScreenPlan.Wishes(_config, remote: false);
+            var uuWishes = _session.InEpisode || _sensor.ManualOverride
+                ? ScreenPlan.ForController(
+                    configuredWishes,
+                    signals.ManualOverride || ControllerClassifier.WantsPhoneScreen(_session.EpisodeControllers(now)))
+                : [];
+            var manualWishes = ScreenPlan.ForManualMode(configuredWishes, ManualRemoteMode);
+            var combinedWishes = standbyWishes.Concat(uuWishes).Concat(manualWishes)
+                .GroupBy(w => w.Id, StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.First())
+                .ToList();
+            _desks.SetWishes(combinedWishes);
+            _desks.SetRemote(_session.InEpisode || ManualRemoteMode != ManualRemoteScreenMode.Off);
 
             if ((now - _lastVerifyAt).TotalSeconds >= 2.0)
             {
@@ -934,9 +945,7 @@ public sealed class AppController : ILogSink
     {
         if (_session.EndNow() is null) return;
         BringCursorHome(includePersistentMain: true);
-        bool remote = _session.InEpisode || _sensor.ManualOverride;
-        _desks.SetWishes(ScreenPlan.ForController(ScreenPlan.Wishes(_config, remote), _sensor.ManualOverride, remote));
-        _desks.SetRemote(_session.InEpisode);
+        OnTick();
         NotifySummary();
         UiStateChanged?.Invoke();
     }
@@ -1033,6 +1042,13 @@ public sealed class AppController : ILogSink
     public void SetManualOverride(bool on)
     {
         _sensor.ManualOverride = on;
+        OnTick();
+        UiStateChanged?.Invoke();
+    }
+
+    public void SetRustDeskManualMode(ManualRemoteScreenMode mode)
+    {
+        ManualRemoteMode = mode;
         OnTick();
         UiStateChanged?.Invoke();
     }

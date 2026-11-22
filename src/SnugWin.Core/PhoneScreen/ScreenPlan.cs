@@ -10,6 +10,14 @@ public enum ScreenBehavior
     Computer
 }
 
+/// <summary>Volatile, user-selected remote source mode; intentionally not persisted.</summary>
+public enum ManualRemoteScreenMode
+{
+    Off,
+    TouchScreen,
+    Computer
+}
+
 public sealed record ScreenWish(
     string Id,
     string Name,
@@ -40,6 +48,15 @@ public static class ScreenPlan
     public static IReadOnlyList<ScreenWish> ForController(IReadOnlyList<ScreenWish> wishes, bool wantsTouch, bool remote = true)
     {
         if (!remote || wishes.Count == 0) return wishes;
+        return wishes.Where(w => w.IsMain || w.IsTouch == wantsTouch).ToList();
+    }
+
+    public static IReadOnlyList<ScreenWish> ForManualMode(
+        IReadOnlyList<ScreenWish> wishes,
+        ManualRemoteScreenMode mode)
+    {
+        if (mode == ManualRemoteScreenMode.Off || wishes.Count == 0) return [];
+        bool wantsTouch = mode == ManualRemoteScreenMode.TouchScreen;
         return wishes.Where(w => w.IsMain || w.IsTouch == wantsTouch).ToList();
     }
 

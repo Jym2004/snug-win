@@ -52,6 +52,11 @@ public sealed class MultiScreenSyncTests : IDisposable
         // Persistent main screen and non-remote standby must never be dropped.
         Assert.Equal(["m", "c"], ScreenPlan.ForController([mainTouch, touch, computer], wantsTouch: false).Select(w => w.Id));
         Assert.Equal(["m"], ScreenPlan.ForController([mainTouch], wantsTouch: false, remote: false).Select(w => w.Id));
+
+        Assert.Equal(["t"], ScreenPlan.ForManualMode([touch, computer], ManualRemoteScreenMode.TouchScreen).Select(w => w.Id));
+        Assert.Equal(["c"], ScreenPlan.ForManualMode([touch, computer], ManualRemoteScreenMode.Computer).Select(w => w.Id));
+        Assert.Empty(ScreenPlan.ForManualMode([touch, computer], ManualRemoteScreenMode.Off));
+        Assert.Empty(ScreenPlan.ForManualMode([touch], ManualRemoteScreenMode.Computer));
     }
 
     [Fact]

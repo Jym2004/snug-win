@@ -25,6 +25,7 @@ public partial class App : System.Windows.Application
     private System.Windows.Forms.ToolStripMenuItem? _statusMenuItem;
     private System.Windows.Forms.ToolStripMenuItem? _reentryMenuItem;
     private System.Windows.Forms.ToolStripMenuItem? _manualPhoneMenuItem;
+    private System.Windows.Forms.ToolStripMenuItem? _rustDeskModeMenuItem;
     private System.Windows.Forms.ToolStripMenuItem? _updateMenuItem;
     private bool _notifiedUpdate;
     private int _balloonTargetTab = 3;
@@ -59,6 +60,16 @@ public partial class App : System.Windows.Application
                         _trayIcon.Icon = desiredIcon;
                 }
                 if (_manualPhoneMenuItem is not null) _manualPhoneMenuItem.Checked = _controller.ManualOverride;
+                if (_rustDeskModeMenuItem is not null)
+                {
+                    string modeText = _controller.ManualRemoteMode switch
+                    {
+                        SnugWin.Core.PhoneScreen.ManualRemoteScreenMode.TouchScreen => "RustDesk：手机触控屏",
+                        SnugWin.Core.PhoneScreen.ManualRemoteScreenMode.Computer => "RustDesk：电脑副屏",
+                        _ => "RustDesk：关闭"
+                    };
+                    _rustDeskModeMenuItem.Text = modeText;
+                }
                 if (_reentryMenuItem is not null) _reentryMenuItem.Visible = _controller.CanReenterPhoneScreen;
             });
         };
@@ -144,6 +155,16 @@ public partial class App : System.Windows.Application
                 _controller.SetManualOverride(_manualPhoneMenuItem.Checked);
         };
         menu.Items.Add(_manualPhoneMenuItem);
+
+        _rustDeskModeMenuItem = new System.Windows.Forms.ToolStripMenuItem("RustDesk：关闭");
+        var rustDeskOff = new System.Windows.Forms.ToolStripMenuItem("关闭");
+        rustDeskOff.Click += (_, _) => Dispatcher.Invoke(() => _controller?.SetRustDeskManualMode(SnugWin.Core.PhoneScreen.ManualRemoteScreenMode.Off));
+        var rustDeskTouch = new System.Windows.Forms.ToolStripMenuItem("手机触控屏");
+        rustDeskTouch.Click += (_, _) => Dispatcher.Invoke(() => _controller?.SetRustDeskManualMode(SnugWin.Core.PhoneScreen.ManualRemoteScreenMode.TouchScreen));
+        var rustDeskComputer = new System.Windows.Forms.ToolStripMenuItem("电脑副屏");
+        rustDeskComputer.Click += (_, _) => Dispatcher.Invoke(() => _controller?.SetRustDeskManualMode(SnugWin.Core.PhoneScreen.ManualRemoteScreenMode.Computer));
+        _rustDeskModeMenuItem.DropDownItems.AddRange([rustDeskOff, rustDeskTouch, rustDeskComputer]);
+        menu.Items.Add(_rustDeskModeMenuItem);
 
         menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
 
