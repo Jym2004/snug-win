@@ -439,6 +439,13 @@ public static unsafe partial class Win32
     public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
 
     [DllImport("user32.dll")]
+    public static extern bool EnumChildWindows(IntPtr hWnd, EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern IntPtr SendMessageTimeoutW(IntPtr hWnd, uint message, IntPtr wParam, IntPtr lParam,
+        uint flags, uint timeout, out IntPtr result);
+
+    [DllImport("user32.dll")]
     public static extern bool IsWindow(IntPtr hWnd);
 
     [DllImport("user32.dll")]

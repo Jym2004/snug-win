@@ -13,9 +13,11 @@ public enum ScreenBehavior
 /// <summary>Volatile, user-selected remote source mode; intentionally not persisted.</summary>
 public enum ManualRemoteScreenMode
 {
-    Off,
-    TouchScreen,
-    Computer
+    /// <summary>Automatically follow a confirmed RustDesk remote-desktop card.</summary>
+    Auto = 3,
+    Off = 0,
+    TouchScreen = 1,
+    Computer = 2
 }
 
 public sealed record ScreenWish(
@@ -55,7 +57,7 @@ public static class ScreenPlan
         IReadOnlyList<ScreenWish> wishes,
         ManualRemoteScreenMode mode)
     {
-        if (mode == ManualRemoteScreenMode.Off || wishes.Count == 0) return [];
+        if (!IsManualOverride(mode) || wishes.Count == 0) return [];
         bool wantsTouch = mode == ManualRemoteScreenMode.TouchScreen;
         return wishes.Where(w => w.IsMain || w.IsTouch == wantsTouch).ToList();
     }
@@ -71,10 +73,37 @@ public static class ScreenPlan
         IReadOnlyList<ScreenWish> wishes,
         ManualRemoteScreenMode mode) => mode switch
         {
+            ManualRemoteScreenMode.Auto => wishes.Any(wish => wish.IsTouch),
+            ManualRemoteScreenMode.Off => false,
             ManualRemoteScreenMode.TouchScreen => wishes.Any(wish => wish.IsTouch),
             ManualRemoteScreenMode.Computer => wishes.Any(wish => !wish.IsTouch),
             _ => false
         };
+
+    public static bool HasAutomaticTarget(IReadOnlyList<ScreenWish> wishes) =>
+        wishes.Any(wish => wish.IsTouch);
+
+    public static ManualRemoteScreenMode EffectiveRemoteMode(
+        ManualRemoteScreenMode selectedMode,
+        bool rustDeskConnected) => selectedMode switch
+        {
+            ManualRemoteScreenMode.Auto => rustDeskConnected
+                ? ManualRemoteScreenMode.TouchScreen
+                : ManualRemoteScreenMode.Off,
+            _ => selectedMode
+        };
+
+    public static bool IsManualOverride(ManualRemoteScreenMode mode) =>
+        mode is ManualRemoteScreenMode.TouchScreen or ManualRemoteScreenMode.Computer;
+
+    public static string RustDeskModeLabel(ManualRemoteScreenMode selectedMode, bool rustDeskConnected) => selectedMode switch
+    {
+        ManualRemoteScreenMode.Auto when rustDeskConnected => "RustDesk：自动（已连接）",
+        ManualRemoteScreenMode.Auto => "RustDesk：自动",
+        ManualRemoteScreenMode.TouchScreen => "RustDesk：手机触控屏",
+        ManualRemoteScreenMode.Computer => "RustDesk：电脑副屏",
+        _ => "RustDesk：关闭"
+    };
 
     public static IReadOnlyList<ScreenWish> DesiredWishes(
         AppConfig config,
@@ -89,16 +118,39 @@ public static class ScreenPlan
         return MergeWishes(standby, uu, manual);
     }
 
-    public static bool IsRemoteActive(bool uuRemoteActive, ManualRemoteScreenMode manualMode) =>
-        uuRemoteActive || manualMode != ManualRemoteScreenMode.Off;
-
-    public static string? ManualModeStatus(ManualRemoteScreenMode mode, bool hasTarget)
+    public static IReadOnlyList<ScreenWish> DesiredWishes(
+        AppConfig config,
+        bool uuRemoteActive,
+        bool uuWantsTouch,
+        ManualRemoteScreenMode selectedMode,
+        bool rustDeskConnected)
     {
+        ManualRemoteScreenMode effectiveMode = EffectiveRemoteMode(selectedMode, rustDeskConnected);
+        if (!HasManualModeTarget(Wishes(config, remote: true), effectiveMode))
+            effectiveMode = ManualRemoteScreenMode.Off;
+        return DesiredWishes(config, uuRemoteActive, uuWantsTouch, effectiveMode);
+    }
+
+    public static bool IsRemoteActive(bool uuRemoteActive, ManualRemoteScreenMode manualMode) =>
+        uuRemoteActive || IsManualOverride(manualMode);
+
+    public static bool IsRemoteActive(bool uuRemoteActive, ManualRemoteScreenMode selectedMode, bool rustDeskConnected) =>
+        IsRemoteActive(uuRemoteActive, EffectiveRemoteMode(selectedMode, rustDeskConnected));
+
+    public static string? ManualModeStatus(ManualRemoteScreenMode mode, bool hasTarget) =>
+        ManualModeStatus(mode, hasTarget, rustDeskConnected: false);
+
+    public static string? ManualModeStatus(ManualRemoteScreenMode selectedMode, bool hasTarget, bool rustDeskConnected)
+    {
+        ManualRemoteScreenMode mode = EffectiveRemoteMode(selectedMode, rustDeskConnected);
+        if (selectedMode == ManualRemoteScreenMode.Auto && !rustDeskConnected)
+            return "RustDesk：自动检测中";
         if (mode == ManualRemoteScreenMode.Off) return null;
-        string targetName = mode == ManualRemoteScreenMode.TouchScreen ? "手机触控屏" : "电脑副屏";
+        string targetName = mode == ManualRemoteScreenMode.Computer ? "电脑副屏" : "手机触控屏";
+        string prefix = selectedMode == ManualRemoteScreenMode.Auto ? "RustDesk 自动" : "RustDesk 手动模式";
         return hasTarget
-            ? $"RustDesk 手动模式（{targetName}）"
-            : $"RustDesk 手动模式未找到已启用的{targetName}配置";
+            ? $"{prefix}（{targetName}）"
+            : $"RustDesk 未找到已启用的{targetName}配置";
     }
 
     public static bool CanReenterPhoneScreen(

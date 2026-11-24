@@ -4,6 +4,7 @@ using System.Windows;
 using SnugWin.App.Controllers;
 using SnugWin.App.Views;
 using SnugWin.Core.Support;
+using SnugWin.Core.PhoneScreen;
 using SnugWin.Windows.Native;
 
 namespace SnugWin.App;
@@ -54,7 +55,8 @@ public partial class App : System.Windows.Application
                 if (_statusMenuItem is not null) _statusMenuItem.Text = $"状态：{summary}";
                 if (_trayIcon is not null)
                 {
-                    _trayIcon.Text = $"SnugWin - {summary}";
+                    string tooltip = $"SnugWin - {summary}";
+                    _trayIcon.Text = tooltip.Length <= 63 ? tooltip : tooltip[..62] + "…";
                     var desiredIcon = _controller.IsPhoneScreenReady ? (_connectedTrayIcon ?? _idleTrayIcon) : _idleTrayIcon;
                     if (desiredIcon is not null && !ReferenceEquals(_trayIcon.Icon, desiredIcon))
                         _trayIcon.Icon = desiredIcon;
@@ -62,13 +64,11 @@ public partial class App : System.Windows.Application
                 if (_manualPhoneMenuItem is not null) _manualPhoneMenuItem.Checked = _controller.ManualOverride;
                 if (_rustDeskModeMenuItem is not null)
                 {
-                    string modeText = _controller.ManualRemoteMode switch
-                    {
-                        SnugWin.Core.PhoneScreen.ManualRemoteScreenMode.TouchScreen => "RustDesk：手机触控屏",
-                        SnugWin.Core.PhoneScreen.ManualRemoteScreenMode.Computer => "RustDesk：电脑副屏",
-                        _ => "RustDesk：关闭"
-                    };
-                    _rustDeskModeMenuItem.Text = modeText;
+                    _rustDeskModeMenuItem.Text = ScreenPlan.RustDeskModeLabel(
+                        _controller.ManualRemoteMode, _controller.RustDeskConnected);
+                    foreach (System.Windows.Forms.ToolStripItem item in _rustDeskModeMenuItem.DropDownItems)
+                        if (item is System.Windows.Forms.ToolStripMenuItem option && option.Tag is ManualRemoteScreenMode mode)
+                            option.Checked = mode == _controller.ManualRemoteMode;
                 }
                 if (_reentryMenuItem is not null) _reentryMenuItem.Visible = _controller.CanReenterPhoneScreen;
             });
@@ -156,14 +156,23 @@ public partial class App : System.Windows.Application
         };
         menu.Items.Add(_manualPhoneMenuItem);
 
-        _rustDeskModeMenuItem = new System.Windows.Forms.ToolStripMenuItem("RustDesk：关闭");
-        var rustDeskOff = new System.Windows.Forms.ToolStripMenuItem("关闭");
-        rustDeskOff.Click += (_, _) => Dispatcher.Invoke(() => _controller?.SetRustDeskManualMode(SnugWin.Core.PhoneScreen.ManualRemoteScreenMode.Off));
-        var rustDeskTouch = new System.Windows.Forms.ToolStripMenuItem("手机触控屏");
-        rustDeskTouch.Click += (_, _) => Dispatcher.Invoke(() => _controller?.SetRustDeskManualMode(SnugWin.Core.PhoneScreen.ManualRemoteScreenMode.TouchScreen));
-        var rustDeskComputer = new System.Windows.Forms.ToolStripMenuItem("电脑副屏");
-        rustDeskComputer.Click += (_, _) => Dispatcher.Invoke(() => _controller?.SetRustDeskManualMode(SnugWin.Core.PhoneScreen.ManualRemoteScreenMode.Computer));
-        _rustDeskModeMenuItem.DropDownItems.AddRange([rustDeskOff, rustDeskTouch, rustDeskComputer]);
+        _rustDeskModeMenuItem = new System.Windows.Forms.ToolStripMenuItem("RustDesk：自动");
+        foreach (var (mode, label) in new[]
+        {
+            (ManualRemoteScreenMode.Auto, "自动（连接时建手机屏）"),
+            (ManualRemoteScreenMode.Off, "关闭"),
+            (ManualRemoteScreenMode.TouchScreen, "手动手机触控屏"),
+            (ManualRemoteScreenMode.Computer, "手动电脑副屏")
+        })
+        {
+            var option = new System.Windows.Forms.ToolStripMenuItem(label)
+            {
+                Tag = mode,
+                Checked = mode == ManualRemoteScreenMode.Auto
+            };
+            option.Click += (_, _) => Dispatcher.Invoke(() => _controller?.SetRustDeskManualMode(mode));
+            _rustDeskModeMenuItem.DropDownItems.Add(option);
+        }
         menu.Items.Add(_rustDeskModeMenuItem);
 
         menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());

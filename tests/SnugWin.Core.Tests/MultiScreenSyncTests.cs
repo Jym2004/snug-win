@@ -97,6 +97,14 @@ public sealed class MultiScreenSyncTests : IDisposable
             ManualRemoteScreenMode.Off));
         Assert.True(ScreenPlan.CanReenterPhoneScreen(false, false, ManualRemoteScreenMode.TouchScreen, true));
         Assert.False(ScreenPlan.CanReenterPhoneScreen(false, false, ManualRemoteScreenMode.Computer, true));
+        Assert.Equal(ManualRemoteScreenMode.Off,
+            ScreenPlan.EffectiveRemoteMode(ManualRemoteScreenMode.Auto, rustDeskConnected: false));
+        Assert.Equal(ManualRemoteScreenMode.TouchScreen,
+            ScreenPlan.EffectiveRemoteMode(ManualRemoteScreenMode.Auto, rustDeskConnected: true));
+        Assert.Equal("RustDesk：自动",
+            ScreenPlan.RustDeskModeLabel(ManualRemoteScreenMode.Auto, rustDeskConnected: false));
+        Assert.Equal("RustDesk：自动（已连接）",
+            ScreenPlan.RustDeskModeLabel(ManualRemoteScreenMode.Auto, rustDeskConnected: true));
     }
 
     [Fact]

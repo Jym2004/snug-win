@@ -33,6 +33,7 @@ public sealed class AppController : ILogSink
     private readonly AppService _apps;
     private readonly TouchHookService _touchHook;
     private readonly UUSensor _sensor;
+    private readonly RustDeskSensor _rustDeskSensor = new();
     private readonly RemoteSession _session = new();
     private readonly DeskSet _desks;
     private readonly Screenshots _screenshots;
@@ -85,8 +86,13 @@ public sealed class AppController : ILogSink
                ?? _config.PrimaryTouchScreen();
     }
     public bool ManualOverride => _sensor.ManualOverride;
-    public ManualRemoteScreenMode ManualRemoteMode { get; private set; }
-    public bool RustDeskManualModeEnabled => ManualRemoteMode != ManualRemoteScreenMode.Off;
+    public ManualRemoteScreenMode ManualRemoteMode { get; private set; } = ManualRemoteScreenMode.Auto;
+    public bool RustDeskConnected => _rustDeskSensor.IsConnected;
+    public ManualRemoteScreenMode EffectiveRustDeskMode =>
+        ScreenPlan.HasManualModeTarget(ScreenPlan.Wishes(_config, remote: true), ManualRemoteMode)
+            ? ScreenPlan.EffectiveRemoteMode(ManualRemoteMode, RustDeskConnected)
+            : ManualRemoteScreenMode.Off;
+    public bool RustDeskManualModeEnabled => ScreenPlan.IsManualOverride(ManualRemoteMode);
     public bool CatalogLoaded => _catalogLoaded;
     public string CurrentVersion => AppUpdateService.CurrentVersion;
     public ReleasePackageKind PackageKind => AppUpdateService.CurrentPackageKind;
@@ -106,7 +112,7 @@ public sealed class AppController : ILogSink
     public bool CanReenterPhoneScreen => ScreenPlan.CanReenterPhoneScreen(
         _session.InEpisode,
         _sensor.ManualOverride,
-        ManualRemoteMode,
+        EffectiveRustDeskMode,
         _desks.HasAnyDismissedTouch);
     public AppThemeMode ThemeMode => _config.Theme;
     public bool IsEffectiveDarkTheme => ResolveIsDarkTheme(_config.Theme);
@@ -220,6 +226,10 @@ public sealed class AppController : ILogSink
             var (signals, now) = await Task.Run(() => _sensor.Sample(wasConnected));
             if (_shuttingDown) return;
 
+            bool wasRustDeskConnected = RustDeskConnected;
+            bool rustDeskConnected = _rustDeskSensor.Sample(now);
+            if (wasRustDeskConnected != rustDeskConnected)
+                Log.Info(rustDeskConnected ? "RustDesk：已确认桌面控制连接" : "RustDesk：桌面控制连接已结束");
             var transitions = _session.Update(signals, now);
             bool interrupted = transitions.Any(t => t is SessionTransition.Interrupted);
             bool ended = transitions.Any(t => t is SessionTransition.Ended);
@@ -231,9 +241,13 @@ public sealed class AppController : ILogSink
                 _config,
                 uuActive,
                 signals.ManualOverride || ControllerClassifier.WantsPhoneScreen(_session.EpisodeControllers(now)),
-                ManualRemoteMode);
+                ManualRemoteMode,
+                rustDeskConnected);
+            if (wasRustDeskConnected && !rustDeskConnected && !uuActive
+                && ManualRemoteMode == ManualRemoteScreenMode.Auto)
+                BringCursorHome(includePersistentMain: true);
             _desks.SetWishes(combinedWishes);
-            _desks.SetRemote(ScreenPlan.IsRemoteActive(uuActive, ManualRemoteMode));
+            _desks.SetRemote(ScreenPlan.IsRemoteActive(uuActive, EffectiveRustDeskMode));
 
             if ((now - _lastVerifyAt).TotalSeconds >= 2.0)
             {
@@ -243,7 +257,7 @@ public sealed class AppController : ILogSink
                 _desks.SettleDisplays();
             }
 
-            bool watching = uuActive || ManualRemoteMode != ManualRemoteScreenMode.Off
+            bool watching = uuActive || ScreenPlan.IsManualOverride(EffectiveRustDeskMode)
                             || (_previewHomeWindow is { IsVisible: true });
             if (ShouldRefreshRunningApps(now, watching))
             {
@@ -1047,7 +1061,7 @@ public sealed class AppController : ILogSink
 
     public void SetRustDeskManualMode(ManualRemoteScreenMode mode)
     {
-        if (!Enum.IsDefined(mode)) mode = ManualRemoteScreenMode.Off;
+        if (!Enum.IsDefined(mode)) mode = ManualRemoteScreenMode.Auto;
         ManualRemoteMode = mode;
         OnTick();
         NotifySummary();
@@ -1157,11 +1171,12 @@ public sealed class AppController : ILogSink
     {
         if (!IsDriverPipeAvailable) return "未检测到虚拟屏驱动";
         var readyCount = _desks.Wishes.Count(w => _desks.StateOf(w.Id)?.ScreenPhase == PhoneScreenPhase.Ready);
-        bool manualModeActive = ManualRemoteMode != ManualRemoteScreenMode.Off;
-        string? manualModeStatus = ScreenPlan.ManualModeStatus(
-            ManualRemoteMode,
-            ScreenPlan.HasManualModeTarget(ScreenPlan.Wishes(_config, remote: true), ManualRemoteMode));
-        string? suffix = manualModeStatus is null ? null : $"；{manualModeStatus}";
+        bool manualModeActive = ScreenPlan.IsManualOverride(EffectiveRustDeskMode);
+        bool hasTarget = ScreenPlan.HasManualModeTarget(ScreenPlan.Wishes(_config, remote: true), ManualRemoteMode);
+        string? manualModeStatus = ScreenPlan.ManualModeStatus(ManualRemoteMode, hasTarget, RustDeskConnected);
+        if ((RustDeskConnected || ScreenPlan.IsManualOverride(ManualRemoteMode)) && !hasTarget)
+            return manualModeStatus!;
+        string? suffix = manualModeStatus is null || !manualModeActive ? null : $"；{manualModeStatus}";
         if (readyCount > 0)
         {
             if (readyCount == 1)
@@ -1179,10 +1194,10 @@ public sealed class AppController : ILogSink
         int suspendedCount = _desks.Wishes.Count(w => _desks.StateOf(w.Id)?.ScreenPhase == PhoneScreenPhase.Suspended);
         if (suspendedCount > 0)
             return $"远程中（{suspendedCount} 块屏等待显示布局恢复{suffix}）";
-        if (_desks.HasAnyDismissedTouch && (_session.InEpisode || ManualRemoteMode == ManualRemoteScreenMode.TouchScreen))
+        if (_desks.HasAnyDismissedTouch && (_session.InEpisode || EffectiveRustDeskMode == ManualRemoteScreenMode.TouchScreen))
             return manualModeActive && !_session.InEpisode ? $"{manualModeStatus}（已退出触屏）" : $"远程中（已退出触屏{suffix}）";
         if (manualModeActive) return manualModeStatus!;
-        return _session.IsConnected ? "远程中" : "待机中";
+        return _session.IsConnected ? "远程中" : manualModeStatus ?? "待机中";
     }
 
     private void NotifySummary() => StateSummaryChanged?.Invoke(GetStatusSummary());
