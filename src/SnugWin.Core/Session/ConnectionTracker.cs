@@ -16,6 +16,14 @@ public sealed class ConnectionTracker
     private DateTimeOffset? _lastPresentAt;
     private DateTimeOffset? _quietUntil;
 
+    public void Reset()
+    {
+        IsConnected = false;
+        Controllers = Array.Empty<string>();
+        _lastPresentAt = null;
+        _quietUntil = null;
+    }
+
     public void NoteSelfInducedChange(DateTimeOffset now)
     {
         var until = now + QuietWindow;

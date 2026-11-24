@@ -58,6 +58,37 @@ public sealed class SessionTests
     }
 
     [Fact]
+    public void RemoteSession_EndNowWaitsForStableDisconnectBeforeRearming()
+    {
+        var session = new RemoteSession();
+        var t0 = DateTimeOffset.UtcNow;
+
+        Assert.IsType<SessionTransition.Began>(Assert.Single(session.Update(
+            new UUSignals(true, ControllerTable.FromNames("Generic Phone"), true), t0)));
+        Assert.IsType<SessionTransition.Interrupted>(Assert.Single(session.Update(
+            new UUSignals(false, ControllerTable.Unreadable, false), t0.AddSeconds(2))));
+        Assert.IsType<SessionTransition.Ended>(session.EndNow());
+        Assert.False(session.InEpisode);
+
+        // A stale positive sensor read cannot immediately recreate the ended episode.
+        Assert.Empty(session.Update(
+            new UUSignals(true, ControllerTable.FromNames("Generic Phone"), true), t0.AddSeconds(3)));
+        Assert.False(session.InEpisode);
+
+        // One second of continuous absence is still inside the 1.5s debounce.
+        Assert.Empty(session.Update(
+            new UUSignals(false, ControllerTable.Unreadable, false), t0.AddSeconds(4)));
+        Assert.False(session.InEpisode);
+
+        // Once absence has stayed stable for 1.5s, a later new connection is accepted.
+        Assert.Empty(session.Update(
+            new UUSignals(false, ControllerTable.Unreadable, false), t0.AddSeconds(5.6)));
+        Assert.IsType<SessionTransition.Began>(Assert.Single(session.Update(
+            new UUSignals(true, ControllerTable.FromNames("Generic Phone"), true), t0.AddSeconds(6))));
+        Assert.True(session.InEpisode);
+    }
+
+    [Fact]
     public void ConnectionTracker_DropsStalePhoneWhenReadableControllerBecomesDesktop()
     {
         var tracker = new ConnectionTracker();

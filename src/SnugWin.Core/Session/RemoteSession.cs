@@ -20,6 +20,8 @@ public sealed class RemoteSession
 
     private List<string> _group = new();
     private readonly Dictionary<string, DateTimeOffset> _departed = new();
+    private bool _waitingForStableDisconnectAfterManualEnd;
+    private DateTimeOffset? _manualEndAbsentSince;
 
     public DateTimeOffset? EpisodeBeganAt { get; private set; }
     public bool IsConnected => Tracker.IsConnected;
@@ -38,6 +40,23 @@ public sealed class RemoteSession
 
     public IReadOnlyList<SessionTransition> Update(UUSignals signals, DateTimeOffset now)
     {
+        if (_waitingForStableDisconnectAfterManualEnd)
+        {
+            if (signals.IsPresent)
+            {
+                _manualEndAbsentSince = null;
+                return Array.Empty<SessionTransition>();
+            }
+
+            _manualEndAbsentSince ??= now;
+            if (now - _manualEndAbsentSince.Value < ConnectionTracker.DisconnectDebounce)
+                return Array.Empty<SessionTransition>();
+
+            _waitingForStableDisconnectAfterManualEnd = false;
+            _manualEndAbsentSince = null;
+            Tracker.Reset();
+        }
+
         var transitions = new List<SessionTransition>();
         if (Episode.Advance(now) == EpisodeChange.Ended)
         {
@@ -85,6 +104,8 @@ public sealed class RemoteSession
         _group.Clear();
         _departed.Clear();
         EpisodeBeganAt = null;
+        _waitingForStableDisconnectAfterManualEnd = true;
+        _manualEndAbsentSince = null;
         return new SessionTransition.Ended();
     }
 

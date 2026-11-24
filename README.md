@@ -145,9 +145,11 @@ UU远程 手机端沿用触控板鼠标逻辑；SnugWin 通过独立高优先级
 ### RustDesk 手动模式
 
 SnugWin 不修改 RustDesk 本体，也不把 RustDesk 后台进程或日志误判成远控会话。
-可从系统托盘菜单选择「RustDesk：手机触控屏」或「RustDesk：电脑副屏」；
-模式只在当前 SnugWin 进程有效，重启后默认关闭。结束 RustDesk 使用后选择「RustDesk：关闭」，
-SnugWin 会归还窗口并撤除该模式创建的虚拟屏；UU 自动检测到的会话与 RustDesk 手动模式可并存。
+RustDesk 连接建立后，在 SnugWin 托盘菜单选择「RustDesk：手机触控屏」或「RustDesk：电脑副屏」，
+并在 RustDesk 的屏幕选择器中手动切到对应虚拟屏；该模式只在当前 SnugWin 进程有效，重启后默认关闭。
+结束 RustDesk 使用后选择「RustDesk：关闭」；SnugWin 会归还仅由该模式管理的窗口并撤掉不再被 UU 或常驻主屏需求的虚拟屏。
+UU 自动检测会话与 RustDesk 手动模式可并存。此模式不自动检测连接/断开，也不改变输入注入过滤设置；
+RustDesk 客户端触控、鼠标手势与远控屏切换兼容性需按实际客户端版本验证。
 
 **固定竖屏像素（可选）**：选好「小米 15 Ultra」并退出 SnugWin，在 `%LocalAppData%\SnugWin\config.json` 的 `Screens` 数组中，仅给该手机竖屏条目加上 `"fixedNativePixels": true`，保存后重启。Windows 虚拟屏只请求 **1440 × 3200**，不随窗口内容改宽；删除该项或设为 `false` 即恢复默认 UU 工具栏适配。此选项不设置 UU 的传输分辨率或码率。
 

@@ -60,6 +60,55 @@ public static class ScreenPlan
         return wishes.Where(w => w.IsMain || w.IsTouch == wantsTouch).ToList();
     }
 
+    /// <summary>Combines independent screen requests without dropping the persistent standby wishes.</summary>
+    public static IReadOnlyList<ScreenWish> MergeWishes(params IReadOnlyList<ScreenWish>[] sources) =>
+        sources.SelectMany(source => source)
+            .GroupBy(wish => wish.Id, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToList();
+
+    public static bool HasManualModeTarget(
+        IReadOnlyList<ScreenWish> wishes,
+        ManualRemoteScreenMode mode) => mode switch
+        {
+            ManualRemoteScreenMode.TouchScreen => wishes.Any(wish => wish.IsTouch),
+            ManualRemoteScreenMode.Computer => wishes.Any(wish => !wish.IsTouch),
+            _ => false
+        };
+
+    public static IReadOnlyList<ScreenWish> DesiredWishes(
+        AppConfig config,
+        bool uuRemoteActive,
+        bool uuWantsTouch,
+        ManualRemoteScreenMode manualMode)
+    {
+        var configured = Wishes(config, remote: true);
+        var standby = Wishes(config, remote: false);
+        var uu = uuRemoteActive ? ForController(configured, uuWantsTouch) : [];
+        var manual = ForManualMode(configured, manualMode);
+        return MergeWishes(standby, uu, manual);
+    }
+
+    public static bool IsRemoteActive(bool uuRemoteActive, ManualRemoteScreenMode manualMode) =>
+        uuRemoteActive || manualMode != ManualRemoteScreenMode.Off;
+
+    public static string? ManualModeStatus(ManualRemoteScreenMode mode, bool hasTarget)
+    {
+        if (mode == ManualRemoteScreenMode.Off) return null;
+        string targetName = mode == ManualRemoteScreenMode.TouchScreen ? "手机触控屏" : "电脑副屏";
+        return hasTarget
+            ? $"RustDesk 手动模式（{targetName}）"
+            : $"RustDesk 手动模式未找到已启用的{targetName}配置";
+    }
+
+    public static bool CanReenterPhoneScreen(
+        bool uuEpisodeActive,
+        bool uuManualOverride,
+        ManualRemoteScreenMode manualMode,
+        bool hasDismissedTouch) =>
+        (uuEpisodeActive || uuManualOverride || manualMode == ManualRemoteScreenMode.TouchScreen)
+        && hasDismissedTouch;
+
     public static IReadOnlyList<ScreenWish> Wishes(AppConfig config, bool remote, bool preview = false)
     {
         var enabled = config.EffectiveScreens()

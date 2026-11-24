@@ -60,6 +60,46 @@ public sealed class MultiScreenSyncTests : IDisposable
     }
 
     [Fact]
+    public void DesiredWishes_MergesUuAndManualRequestsAndKeepsMainOnShutdown()
+    {
+        var phone = new PhoneChoice("Generic Phone", new PhoneScreenSpecData(1080, 2400, 360), DeviceKind.Phone);
+        var computer = new PhoneChoice("Generic Desktop", new PhoneScreenSpecData(1920, 1080), DeviceKind.Computer);
+        var config = new AppConfig()
+            .WithMainScreen(ScreenConfig.LegacyPhoneId)
+            .WithScreenAdded(ScreenOrientation.Portrait, phone, "Phone Screen")
+            .WithScreenAdded(ScreenOrientation.Landscape, computer, "Computer Screen");
+
+        var standby = ScreenPlan.DesiredWishes(config, uuRemoteActive: false, uuWantsTouch: false,
+            ManualRemoteScreenMode.Off);
+        Assert.Equal([ScreenConfig.LegacyPhoneId], standby.Select(wish => wish.Id));
+        Assert.False(ScreenPlan.IsRemoteActive(false, ManualRemoteScreenMode.Off));
+
+        var combined = ScreenPlan.DesiredWishes(config, uuRemoteActive: true, uuWantsTouch: false,
+            ManualRemoteScreenMode.TouchScreen);
+        Assert.Equal(3, combined.Count);
+        Assert.Equal(3, combined.Select(wish => wish.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.Contains(combined, wish => wish.IsMain);
+        Assert.Contains(combined, wish => wish.IsTouch && !wish.IsMain);
+        Assert.Contains(combined, wish => !wish.IsTouch);
+        Assert.True(ScreenPlan.IsRemoteActive(true, ManualRemoteScreenMode.Off));
+
+        var afterManualOff = ScreenPlan.DesiredWishes(config, uuRemoteActive: true, uuWantsTouch: false,
+            ManualRemoteScreenMode.Off);
+        Assert.Equal(2, afterManualOff.Count);
+        Assert.Contains(afterManualOff, wish => wish.IsMain);
+        Assert.Contains(afterManualOff, wish => !wish.IsTouch);
+
+        Assert.True(ScreenPlan.HasManualModeTarget(ScreenPlan.Wishes(config, remote: true),
+            ManualRemoteScreenMode.TouchScreen));
+        Assert.True(ScreenPlan.HasManualModeTarget(ScreenPlan.Wishes(config, remote: true),
+            ManualRemoteScreenMode.Computer));
+        Assert.False(ScreenPlan.HasManualModeTarget(ScreenPlan.Wishes(config, remote: true),
+            ManualRemoteScreenMode.Off));
+        Assert.True(ScreenPlan.CanReenterPhoneScreen(false, false, ManualRemoteScreenMode.TouchScreen, true));
+        Assert.False(ScreenPlan.CanReenterPhoneScreen(false, false, ManualRemoteScreenMode.Computer, true));
+    }
+
+    [Fact]
     public void PhoneCatalog_LoadsUpstreamDeviceModelsJson_HasPhoneTabletComputer()
     {
         string path = Path.Combine(AppContext.BaseDirectory, "Assets", "device-models.json");

@@ -103,7 +103,11 @@ public sealed class AppController : ILogSink
     public bool IsElevated => new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
     public string LogDirectory => _paths.LogDirectory;
     public bool IsPhoneScreenReady => _desks.IsAnyReady;
-    public bool CanReenterPhoneScreen => (_session.InEpisode || _sensor.ManualOverride) && _desks.HasAnyDismissedTouch;
+    public bool CanReenterPhoneScreen => ScreenPlan.CanReenterPhoneScreen(
+        _session.InEpisode,
+        _sensor.ManualOverride,
+        ManualRemoteMode,
+        _desks.HasAnyDismissedTouch);
     public AppThemeMode ThemeMode => _config.Theme;
     public bool IsEffectiveDarkTheme => ResolveIsDarkTheme(_config.Theme);
     public IReadOnlyList<RunningApp> RunningApps => _runningApps;
@@ -222,20 +226,14 @@ public sealed class AppController : ILogSink
             if (interrupted || ended)
                 BringCursorHome(includePersistentMain: true);
 
-            var configuredWishes = ScreenPlan.Wishes(_config, remote: true);
-            var standbyWishes = ScreenPlan.Wishes(_config, remote: false);
-            var uuWishes = _session.InEpisode || _sensor.ManualOverride
-                ? ScreenPlan.ForController(
-                    configuredWishes,
-                    signals.ManualOverride || ControllerClassifier.WantsPhoneScreen(_session.EpisodeControllers(now)))
-                : [];
-            var manualWishes = ScreenPlan.ForManualMode(configuredWishes, ManualRemoteMode);
-            var combinedWishes = standbyWishes.Concat(uuWishes).Concat(manualWishes)
-                .GroupBy(w => w.Id, StringComparer.OrdinalIgnoreCase)
-                .Select(g => g.First())
-                .ToList();
+            bool uuActive = _session.InEpisode || _sensor.ManualOverride;
+            var combinedWishes = ScreenPlan.DesiredWishes(
+                _config,
+                uuActive,
+                signals.ManualOverride || ControllerClassifier.WantsPhoneScreen(_session.EpisodeControllers(now)),
+                ManualRemoteMode);
             _desks.SetWishes(combinedWishes);
-            _desks.SetRemote(_session.InEpisode || ManualRemoteMode != ManualRemoteScreenMode.Off);
+            _desks.SetRemote(ScreenPlan.IsRemoteActive(uuActive, ManualRemoteMode));
 
             if ((now - _lastVerifyAt).TotalSeconds >= 2.0)
             {
@@ -245,7 +243,8 @@ public sealed class AppController : ILogSink
                 _desks.SettleDisplays();
             }
 
-            bool watching = remote || (_previewHomeWindow is { IsVisible: true });
+            bool watching = uuActive || ManualRemoteMode != ManualRemoteScreenMode.Off
+                            || (_previewHomeWindow is { IsVisible: true });
             if (ShouldRefreshRunningApps(now, watching))
             {
                 _lastCatalogRefresh = now;
@@ -1048,8 +1047,10 @@ public sealed class AppController : ILogSink
 
     public void SetRustDeskManualMode(ManualRemoteScreenMode mode)
     {
+        if (!Enum.IsDefined(mode)) mode = ManualRemoteScreenMode.Off;
         ManualRemoteMode = mode;
         OnTick();
+        NotifySummary();
         UiStateChanged?.Invoke();
     }
 
@@ -1156,21 +1157,31 @@ public sealed class AppController : ILogSink
     {
         if (!IsDriverPipeAvailable) return "未检测到虚拟屏驱动";
         var readyCount = _desks.Wishes.Count(w => _desks.StateOf(w.Id)?.ScreenPhase == PhoneScreenPhase.Ready);
+        bool manualModeActive = ManualRemoteMode != ManualRemoteScreenMode.Off;
+        string? manualModeStatus = ScreenPlan.ManualModeStatus(
+            ManualRemoteMode,
+            ScreenPlan.HasManualModeTarget(ScreenPlan.Wishes(_config, remote: true), ManualRemoteMode));
+        string? suffix = manualModeStatus is null ? null : $"；{manualModeStatus}";
         if (readyCount > 0)
         {
             if (readyCount == 1)
-                return _session.IsConnected ? "远程中（虚拟屏已就绪）" : "虚拟屏就绪";
-            return _session.IsConnected ? $"远程中（{readyCount} 块屏就绪）" : $"{readyCount} 块屏就绪";
+                return manualModeActive && !_session.IsConnected
+                    ? $"{manualModeStatus}（虚拟屏已就绪）"
+                    : _session.IsConnected ? $"远程中（虚拟屏已就绪{suffix}）" : "虚拟屏就绪";
+            return manualModeActive && !_session.IsConnected
+                ? $"{manualModeStatus}（{readyCount} 块屏就绪）"
+                : _session.IsConnected ? $"远程中（{readyCount} 块屏就绪{suffix}）" : $"{readyCount} 块屏就绪";
         }
         if (_desks.Wishes.Any(w => _desks.StateOf(w.Id)?.ScreenPhase == PhoneScreenPhase.Preparing))
-            return "正在创建虚拟屏...";
+            return manualModeActive ? $"{manualModeStatus}，正在创建虚拟屏..." : "正在创建虚拟屏...";
         if (_desks.Wishes.Any(w => _desks.StateOf(w.Id)?.ScreenPhase == PhoneScreenPhase.Failed))
-            return "建屏失败（重试中）";
+            return manualModeActive ? $"{manualModeStatus}，建屏失败（重试中）" : "建屏失败（重试中）";
         int suspendedCount = _desks.Wishes.Count(w => _desks.StateOf(w.Id)?.ScreenPhase == PhoneScreenPhase.Suspended);
         if (suspendedCount > 0)
-            return $"远程中（{suspendedCount} 块屏等待显示布局恢复）";
-        if (_desks.HasAnyDismissedTouch && _session.InEpisode)
-            return "远程中（已退出触屏）";
+            return $"远程中（{suspendedCount} 块屏等待显示布局恢复{suffix}）";
+        if (_desks.HasAnyDismissedTouch && (_session.InEpisode || ManualRemoteMode == ManualRemoteScreenMode.TouchScreen))
+            return manualModeActive && !_session.InEpisode ? $"{manualModeStatus}（已退出触屏）" : $"远程中（已退出触屏{suffix}）";
+        if (manualModeActive) return manualModeStatus!;
         return _session.IsConnected ? "远程中" : "待机中";
     }
 
