@@ -88,6 +88,7 @@ public sealed class PhoneDesk
     private const double ReplaceWait = 10.0;
     private const double DisplayRecoveryDebounce = 1.0;
     private static readonly double[] DisplayRecoveryDelays = [5.0, 15.0, 30.0];
+    private const double DisplayStableWindow = 10.0;
 
     private readonly IPhoneDisplays _displays;
     private readonly IWindowControl _windows;
@@ -117,6 +118,8 @@ public sealed class PhoneDesk
     private double _offlineRetryAt;
     private int _offlineAttempts;
     private bool _offlineRebuildUsed;
+    private double? _reactivatedAt;
+    private int _relapseCount;
     private bool _recoveringDisplay;
     private CancellationTokenSource? _pendingRetryCts;
     private Task? _pendingRetryTask;
@@ -638,7 +641,11 @@ public sealed class PhoneDesk
             || State.ScreenPhase is not (PhoneScreenPhase.Ready or PhoneScreenPhase.Suspended)) return;
 
         bool online = _displays.IsAttachedToDesktop(current.Id);
-        if (online && _offlineSince is null) return;
+        if (online && _offlineSince is null)
+        {
+            NoteStableRecovery();
+            return;
+        }
 
         if (!online)
         {
@@ -647,6 +654,15 @@ public sealed class PhoneDesk
                 _offlineSince = _timeline.Now;
                 Log.Warn($"虚拟屏「{_screenName}」#{current.Id} 已脱离活动桌面，暂停使用");
                 State = State with { ScreenPhase = PhoneScreenPhase.Suspended };
+                if (_reactivatedAt is { } reactivatedAt
+                    && _timeline.Now - reactivatedAt < DisplayStableWindow)
+                {
+                    _relapseCount++;
+                    double wait = DisplayRecoveryDelays[Math.Min(_relapseCount - 1, DisplayRecoveryDelays.Length - 1)];
+                    _offlineRetryAt = _timeline.Now + wait;
+                    Log.Warn($"虚拟屏「{_screenName}」#{current.Id} 回接后 {_timeline.Now - reactivatedAt:0} 秒又脱离，{wait:0} 秒后重试");
+                }
+                _reactivatedAt = null;
             }
             if (_displays.IsRemoteExclusiveDisplayActive()
                 || _timeline.Now - _offlineSince.Value < DisplayRecoveryDebounce
@@ -690,12 +706,23 @@ public sealed class PhoneDesk
         }
 
         _offlineSince = null;
-        _offlineAttempts = 0;
-        _offlineRetryAt = 0;
+        _reactivatedAt = _timeline.Now;
         State = State with { ScreenPhase = PhoneScreenPhase.Ready };
         Log.Info($"虚拟屏「{_screenName}」#{current.Id} 已恢复到活动桌面");
         if (State.ListVisible) await MatchWidthAsync();
         else await RefillAsync("虚拟屏恢复后重新铺满");
+    }
+
+    /// <summary>Clears the relapse ladder only once a reactivated screen has stayed online.</summary>
+    private void NoteStableRecovery()
+    {
+        if (_reactivatedAt is not { } reactivatedAt) return;
+        if (_timeline.Now - reactivatedAt < DisplayStableWindow) return;
+
+        _reactivatedAt = null;
+        _relapseCount = 0;
+        _offlineAttempts = 0;
+        _offlineRetryAt = 0;
     }
 
     private async Task AddScreenAsync()
@@ -710,6 +737,8 @@ public sealed class PhoneDesk
         _offlineSince = null;
         _offlineAttempts = 0;
         _offlineRetryAt = 0;
+        _reactivatedAt = null;
+        _relapseCount = 0;
         State = State with { ScreenPhase = PhoneScreenPhase.Preparing };
         if (_retiring is { } old)
         {
@@ -781,6 +810,8 @@ public sealed class PhoneDesk
         _offlineSince = null;
         _offlineAttempts = 0;
         _offlineRetryAt = 0;
+        _reactivatedAt = null;
+        _relapseCount = 0;
         if (resetRebuildBudget) _offlineRebuildUsed = false;
         if (_placement is { } p) await PutBackAsync(p.Record);
         SetPlacement(null);

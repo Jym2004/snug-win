@@ -257,6 +257,50 @@ public sealed class PhoneDeskTests : IDisposable
     }
 
     [Fact]
+    public async Task QuickRelapseAfterReactivation_BacksOffInsteadOfFlapping()
+    {
+        var displays = new FakeDisplays();
+        var timeline = new FakeTimeline();
+        var desk = new PhoneDesk(displays, new FakeWindows(), new FakeApps(), _paths, timeline);
+
+        desk.SetWanted(true);
+        await desk.IdleAsync();
+        Assert.Equal(PhoneScreenPhase.Ready, desk.State.ScreenPhase);
+
+        // First loss needs one tick to record the detachment, then the 1s debounce, then one reactivation.
+        displays.Detached = true;
+        timeline.Now += 2;
+        desk.SettleDisplays();
+        await desk.IdleAsync();
+        Assert.Equal(0, displays.Reactivations);
+
+        timeline.Now += 2;
+        desk.SettleDisplays();
+        await desk.IdleAsync();
+        Assert.Equal(1, displays.Reactivations);
+        Assert.Equal(PhoneScreenPhase.Ready, desk.State.ScreenPhase);
+
+        // Drops again 1s later: must not retry at the 1s debounce, must take the 5s ladder step.
+        displays.Detached = true;
+        timeline.Now += 1;
+        desk.SettleDisplays();
+        await desk.IdleAsync();
+        Assert.Equal(PhoneScreenPhase.Suspended, desk.State.ScreenPhase);
+
+        timeline.Now += 2;
+        desk.SettleDisplays();
+        await desk.IdleAsync();
+        Assert.Equal(1, displays.Reactivations);
+
+        // Once the 5s ladder step elapses the next attempt is allowed.
+        timeline.Now += 4;
+        desk.SettleDisplays();
+        await desk.IdleAsync();
+        Assert.Equal(2, displays.Reactivations);
+        Assert.Equal(PhoneScreenPhase.Ready, desk.State.ScreenPhase);
+    }
+
+    [Fact]
     public async Task OfflineDisplay_RebuildsAtMostOncePerConnectionWhenDetachmentRepeats()
     {
         var displays = new FakeDisplays { FailReactivation = true };
