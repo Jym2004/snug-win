@@ -301,6 +301,33 @@ public sealed class PhoneDeskTests : IDisposable
     }
 
     [Fact]
+    public async Task RepeatedRelapses_StopReactivatingForThisConnection()
+    {
+        var displays = new FakeDisplays();
+        var timeline = new FakeTimeline();
+        var desk = new PhoneDesk(displays, new FakeWindows(), new FakeApps(), _paths, timeline);
+
+        desk.SetWanted(true);
+        await desk.IdleAsync();
+
+        // Each cycle: detach 1s after the last reactivation (a relapse), then wait past the ladder step.
+        for (int i = 0; i < 6; i++)
+        {
+            displays.Detached = true;
+            timeline.Now += 1;
+            desk.SettleDisplays();
+            await desk.IdleAsync();
+
+            timeline.Now += 31;
+            desk.SettleDisplays();
+            await desk.IdleAsync();
+        }
+
+        Assert.Equal(4, displays.Reactivations);
+        Assert.Equal(PhoneScreenPhase.Suspended, desk.State.ScreenPhase);
+    }
+
+    [Fact]
     public async Task OfflineDisplay_RebuildsAtMostOncePerConnectionWhenDetachmentRepeats()
     {
         var displays = new FakeDisplays { FailReactivation = true };

@@ -89,6 +89,7 @@ public sealed class PhoneDesk
     private const double DisplayRecoveryDebounce = 1.0;
     private static readonly double[] DisplayRecoveryDelays = [5.0, 15.0, 30.0];
     private const double DisplayStableWindow = 10.0;
+    private const int DisplayMaxRelapses = 3;
 
     private readonly IPhoneDisplays _displays;
     private readonly IWindowControl _windows;
@@ -120,6 +121,7 @@ public sealed class PhoneDesk
     private bool _offlineRebuildUsed;
     private double? _reactivatedAt;
     private int _relapseCount;
+    private bool _relapseExhausted;
     private bool _recoveringDisplay;
     private CancellationTokenSource? _pendingRetryCts;
     private Task? _pendingRetryTask;
@@ -658,13 +660,22 @@ public sealed class PhoneDesk
                     && _timeline.Now - reactivatedAt < DisplayStableWindow)
                 {
                     _relapseCount++;
-                    double wait = DisplayRecoveryDelays[Math.Min(_relapseCount - 1, DisplayRecoveryDelays.Length - 1)];
-                    _offlineRetryAt = _timeline.Now + wait;
-                    Log.Warn($"虚拟屏「{_screenName}」#{current.Id} 回接后 {_timeline.Now - reactivatedAt:0} 秒又脱离，{wait:0} 秒后重试");
+                    if (_relapseCount > DisplayMaxRelapses)
+                    {
+                        _relapseExhausted = true;
+                        Log.Warn($"虚拟屏「{_screenName}」#{current.Id} 回接后反复失效 {_relapseCount} 次，本次连接不再回接（等桌面拓扑变化）");
+                    }
+                    else
+                    {
+                        double wait = DisplayRecoveryDelays[Math.Min(_relapseCount - 1, DisplayRecoveryDelays.Length - 1)];
+                        _offlineRetryAt = _timeline.Now + wait;
+                        Log.Warn($"虚拟屏「{_screenName}」#{current.Id} 回接后 {_timeline.Now - reactivatedAt:0} 秒又脱离，{wait:0} 秒后重试");
+                    }
                 }
                 _reactivatedAt = null;
             }
-            if (_displays.IsRemoteExclusiveDisplayActive()
+            if (_relapseExhausted
+                || _displays.IsRemoteExclusiveDisplayActive()
                 || _timeline.Now - _offlineSince.Value < DisplayRecoveryDebounce
                 || _timeline.Now < _offlineRetryAt
                 || _offlineAttempts > DisplayRecoveryDelays.Length)
@@ -721,6 +732,7 @@ public sealed class PhoneDesk
 
         _reactivatedAt = null;
         _relapseCount = 0;
+        _relapseExhausted = false;
         _offlineAttempts = 0;
         _offlineRetryAt = 0;
     }
@@ -739,6 +751,7 @@ public sealed class PhoneDesk
         _offlineRetryAt = 0;
         _reactivatedAt = null;
         _relapseCount = 0;
+        _relapseExhausted = false;
         State = State with { ScreenPhase = PhoneScreenPhase.Preparing };
         if (_retiring is { } old)
         {
@@ -812,6 +825,7 @@ public sealed class PhoneDesk
         _offlineRetryAt = 0;
         _reactivatedAt = null;
         _relapseCount = 0;
+        _relapseExhausted = false;
         if (resetRebuildBudget) _offlineRebuildUsed = false;
         if (_placement is { } p) await PutBackAsync(p.Record);
         SetPlacement(null);
