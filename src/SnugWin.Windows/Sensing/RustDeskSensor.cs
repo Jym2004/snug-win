@@ -17,6 +17,7 @@ public sealed class RustDeskSensor
     private const string ProcessName = "RustDesk";
     private const string CmSwitch = "--cm";
     private const string FlutterViewClass = "FLUTTERVIEW";
+    private const string FlutterRunnerClass = "FLUTTER_RUNNER_WIN32_WINDOW";
     private const int ObjIdClient = -4;
     private const uint WmGetObject = 0x003D;
     private const int MaxMatchingWindows = 256;
@@ -147,11 +148,14 @@ public sealed class RustDeskSensor
     private static bool? ReadConnectedCard()
     {
         int sessionId = Process.GetCurrentProcess().SessionId;
+        bool? connectionManager = RustDeskProcessProbe.HasConnectionManagerProcess(sessionId);
+        if (connectionManager is not null) return connectionManager;
+
+        // Command lines unreadable: fall back to walking the RustDesk UI tree.
         long start = Stopwatch.GetTimestamp();
         long budget = (long)(Stopwatch.Frequency * ScanBudget.TotalSeconds);
-        var processResult = FindConnectionManagerProcessIds(sessionId);
-        if (processResult.IsUnknown) return null;
-        if (processResult.ProcessIds.Count == 0) return false;
+        var processIds = RustDeskProcessProbe.FindSessionProcessIds(sessionId);
+        if (processIds.Count == 0) return false;
 
         var roots = new List<RustDeskAccessibleNode>();
         var inspectedWindows = new HashSet<IntPtr>();
@@ -159,7 +163,7 @@ public sealed class RustDeskSensor
         bool incomplete = false;
         bool budgetExpired = false;
 
-        foreach (int pid in processResult.ProcessIds)
+        foreach (int pid in processIds)
         {
             if (HasBudgetExpired(start, budget)) return null;
             Win32.EnumWindows((hwnd, _) =>
@@ -203,10 +207,17 @@ public sealed class RustDeskSensor
             if (budgetExpired || matchingWindows > MaxMatchingWindows) return null;
         }
 
-        if (roots.Count == 0) return null;
+        if (roots.Count == 0) return matchingWindows == 0 ? false : null;
         var parsed = RustDeskConnectionParser.DetectAuthorizedDesktopConnection(roots);
         if (parsed == true) return true;
         return incomplete ? null : parsed;
+    }
+
+    private static bool IsFlutterRoot(IntPtr hwnd)
+    {
+        string windowClass = Win32.GetWindowClass(hwnd);
+        return string.Equals(windowClass, FlutterViewClass, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(windowClass, FlutterRunnerClass, StringComparison.OrdinalIgnoreCase);
     }
 
     private static void InspectIfFlutterView(
@@ -218,7 +229,7 @@ public sealed class RustDeskSensor
         long start,
         long budget)
     {
-        if (!string.Equals(Win32.GetWindowClass(hwnd), FlutterViewClass, StringComparison.OrdinalIgnoreCase)) return;
+        if (!IsFlutterRoot(hwnd)) return;
         if (!inspectedWindows.Add(hwnd)) return;
         matchingWindows++;
         if (matchingWindows > MaxMatchingWindows)
@@ -378,67 +389,6 @@ public sealed class RustDeskSensor
         if (value is not null && Marshal.IsComObject(value))
         {
             try { Marshal.ReleaseComObject(value); } catch { }
-        }
-    }
-
-    private sealed record ProcessScanResult(HashSet<int> ProcessIds, bool IsUnknown);
-
-    private static ProcessScanResult FindConnectionManagerProcessIds(int sessionId)
-    {
-        Process[] processes;
-        try { processes = Process.GetProcessesByName(ProcessName); }
-        catch { return new ProcessScanResult(new HashSet<int>(), true); }
-        if (processes.Length == 0) return new ProcessScanResult(new HashSet<int>(), false);
-        foreach (var process in processes) process.Dispose();
-
-        object? locator = null;
-        object? services = null;
-        object? results = null;
-        try
-        {
-            Type? locatorType = Type.GetTypeFromProgID("WbemScripting.SWbemLocator");
-            if (locatorType is null) return new ProcessScanResult(new HashSet<int>(), true);
-            locator = Activator.CreateInstance(locatorType);
-            if (locator is null) return new ProcessScanResult(new HashSet<int>(), true);
-
-            dynamic dynamicLocator = locator;
-            services = dynamicLocator.ConnectServer(".", @"root\cimv2");
-            dynamic dynamicServices = services;
-            results = dynamicServices.ExecQuery(
-                "SELECT ProcessId, SessionId, CommandLine FROM Win32_Process WHERE Name='RustDesk.exe'");
-            dynamic dynamicResults = results;
-            var ids = new HashSet<int>();
-            bool unknown = false;
-            foreach (dynamic process in dynamicResults)
-            {
-                try
-                {
-                    if (Convert.ToInt32(process.SessionId) != sessionId) continue;
-                    object? commandLineValue = process.CommandLine;
-                    if (commandLineValue is null || commandLineValue is DBNull)
-                    {
-                        unknown = true;
-                        continue;
-                    }
-
-                    string commandLine = Convert.ToString(commandLineValue) ?? string.Empty;
-                    if (Regex.IsMatch(commandLine, @"(?:^|\s)--cm(?:\s|$)", RegexOptions.IgnoreCase))
-                        ids.Add(Convert.ToInt32(process.ProcessId));
-                }
-                finally { ReleaseComReference(process); }
-            }
-            return new ProcessScanResult(ids, unknown);
-        }
-        catch (Exception ex)
-        {
-            Log.Warn($"RustDesk 连接管理器枚举失败（{ex.GetType().Name}），保留最近状态");
-            return new ProcessScanResult(new HashSet<int>(), true);
-        }
-        finally
-        {
-            ReleaseComReference(results);
-            ReleaseComReference(services);
-            ReleaseComReference(locator);
         }
     }
 
