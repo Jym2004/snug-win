@@ -1040,7 +1040,15 @@ public sealed class PhoneDesk
 
     private async Task<RectD?> FillAsync(Placement p, uint id)
     {
-        if (!await SwitchWidthAsync(id, p.Width)) return null;
+        // 驱动没有对应模式时 ChangeDisplaySettingsEx 会返回 -1；此时退到当前宽度继续放置，
+        // 不要因为"切不到目标宽度"把整次放置作废。
+        bool switched = await SwitchWidthAsync(id, p.Width);
+        if (!switched)
+        {
+            if (_displays.WidthOf(id) is not { } kept) return null;
+            Log.Warn($"手机屏 #{id} 按 {p.Width} 宽放不下，改用现有 {kept} 宽");
+        }
+
         if (_displays.WindowAreaOf(id) is not { } area) return null;
         if (await _windows.MoveAsync(p.Window.Key, area) is not { } got) return null;
 
@@ -1056,6 +1064,17 @@ public sealed class PhoneDesk
             _ = await _windows.MoveAsync(p.Window.Key, relay);
             if (await _windows.MoveAsync(p.Window.Key, area) is not { } retried) return null;
             got = retried;
+        }
+
+        if (got.Width > bounds.Width + 2 || got.Height > bounds.Height + 2)
+        {
+            var fitted = new RectD(
+                bounds.MinX,
+                bounds.MinY,
+                Math.Min(got.Width, bounds.Width),
+                Math.Min(got.Height, bounds.Height));
+            Log.Info($"{p.Window.Label} 比手机屏宽（实际 {got.Short}，屏 {bounds.Short}），压到屏内再放");
+            if (await _windows.MoveAsync(p.Window.Key, fitted) is { } shrunk) got = shrunk;
         }
 
         if (!OriginOnScreen(got, bounds))
